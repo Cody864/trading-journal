@@ -1,0 +1,2830 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Trading Journal</title>
+<link rel="icon" type="image/x-icon" href="sharingan.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+  :root {
+    --bg: #000000;
+    --panel: #0d0d0d;
+    --panel-2: #141414;
+    --line: #222222;
+    --text: #ffffff;
+    --muted: #555555;
+    --muted-light: #888888;
+    --green: #ffffff;
+    --red: #e0001a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    min-height: 100vh;
+  }
+  #root { min-height: 100vh; }
+
+  .journal-shell { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; padding: 36px; font-size: 1.05em; }
+
+  /* ── Topbar ── */
+  .topbar { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 24px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark { width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); }
+  .brand-name { font-family: 'JetBrains Mono', monospace; font-weight: 700; letter-spacing: 0.22em; font-size: 13px; color: var(--muted-light); text-transform: uppercase; }
+
+  /* ── Buttons ── */
+  .btn-primary {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--red); color: #fff;
+    border: none; border-radius: 6px;
+    padding: 12px 20px; font-size: 13px; font-weight: 700;
+    cursor: pointer; transition: opacity .15s ease, transform .1s ease;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .btn-primary:hover { opacity: 0.85; }
+  .btn-primary:active { transform: scale(0.98); }
+  .btn-block { width: 100%; justify-content: center; margin-top: 8px; }
+  .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  /* ── Notice ── */
+  .notice {
+    background: var(--panel); border: 1px solid var(--line); border-left: 2px solid var(--muted);
+    border-radius: 4px; padding: 14px 18px; font-size: 13px; color: var(--muted-light); line-height: 1.6;
+  }
+  .notice-error { border-left-color: var(--red); color: #ff6b78; }
+
+  /* ── Hero ── */
+  .hero {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 32px 34px; display: flex; align-items: center; justify-content: space-between; gap: 28px;
+    flex-wrap: wrap;
+  }
+  .hero-balance { display: flex; flex-direction: column; gap: 10px; min-width: 240px; }
+  .hero-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em; }
+  .hero-value { font-family: 'JetBrains Mono', monospace; font-size: 44px; font-weight: 700; letter-spacing: -0.02em; color: var(--text); }
+  .hero-delta { display: inline-flex; align-items: center; gap: 5px; font-size: 14px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .hero-delta.pos { color: var(--text); }
+  .hero-delta.neg { color: var(--red); }
+  .hero-curve { flex: 1; min-width: 280px; max-width: 700px; }
+  .equity-svg { width: 100%; height: 130px; display: block; }
+
+  /* ── Stat Row ── */
+  .stat-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .stat-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; }
+  .stat-value { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; }
+
+  /* ── Calendar ── */
+  .cal-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 26px 28px 18px; }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+  .cal-title { font-size: 20px; font-weight: 700; display: flex; gap: 10px; align-items: baseline; letter-spacing: -0.01em; }
+  .cal-year { color: var(--muted); font-weight: 400; font-size: 16px; }
+  .cal-nav { display: flex; align-items: center; gap: 12px; }
+  .cal-month-pnl { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--muted-light); }
+  .cal-month-pnl.pos { color: var(--text); }
+  .cal-month-pnl.neg { color: var(--red); }
+  .cal-navbtn {
+    background: transparent; border: 1px solid var(--line); color: var(--muted-light);
+    border-radius: 4px; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: border-color .15s ease, color .15s ease;
+  }
+  .cal-navbtn:hover { border-color: var(--muted-light); color: var(--text); }
+
+  .cal-grid-header { display: grid; grid-template-columns: repeat(7, 1fr) 130px; gap: 6px; margin-bottom: 6px; }
+  .cal-dow { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; text-align: center; padding-bottom: 8px; }
+  .cal-dow-week { text-align: left; padding-left: 4px; }
+
+  .cal-week { display: grid; grid-template-columns: repeat(7, 1fr) 130px; gap: 6px; margin-bottom: 6px; }
+  .cal-cell {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+    min-height: 80px; padding: 9px 10px; display: flex; flex-direction: column; gap: 3px;
+    text-align: left; cursor: default; font-family: inherit; color: var(--text);
+  }
+  .cal-cell-empty { background: transparent; border: none; }
+  .cal-daynum { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+  .cal-pnl { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; margin-top: auto; }
+  .cal-count { font-size: 11px; color: var(--muted); }
+  .cal-win { border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.03); }
+  .cal-win .cal-pnl { color: var(--text); }
+  .cal-loss { border-color: rgba(224,0,26,0.4); background: rgba(224,0,26,0.06); }
+  .cal-loss .cal-pnl { color: var(--red); }
+  .cal-cell:not(.cal-cell-empty):not(:disabled) { cursor: pointer; transition: border-color .1s ease; }
+  .cal-cell:not(.cal-cell-empty):not(:disabled):hover { border-color: var(--muted-light); }
+  .cal-today { box-shadow: 0 0 0 1px var(--red) inset; }
+  .cal-cell-historic { opacity: 0.38; }
+  .cal-cell-historic .cal-pnl { text-decoration: line-through; text-decoration-color: rgba(255,255,255,0.3); }
+  .cal-historic-badge { font-size: 9px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 1px; }
+
+  .cal-weeksum { background: transparent; border: 1px solid var(--line); border-style: dashed; justify-content: center; gap: 3px; }
+  .cal-weeknum { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; letter-spacing: 0.05em; }
+  .cal-weekpnl { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; }
+  .cal-weekpnl.pos { color: var(--text); }
+  .cal-weekpnl.neg { color: var(--red); }
+  .cal-weekcount { font-size: 11px; color: var(--muted); }
+
+  .cal-loading { padding: 30px 0; text-align: center; color: var(--muted); font-size: 12px; letter-spacing: 0.08em; }
+
+  /* ── Filter Bar ── */
+  .filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .filter-group { display: flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 4px; }
+  .filter-chip {
+    background: transparent; border: none; color: var(--muted-light); border-radius: 3px;
+    padding: 7px 12px; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: all .12s ease;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap;
+  }
+  .filter-chip:hover { color: var(--text); }
+  .filter-chip.active { background: var(--line); color: var(--text); }
+  .filter-chip.active.win-chip { background: rgba(255,255,255,0.1); }
+  .filter-chip.active.loss-chip { background: rgba(224,0,26,0.18); color: var(--red); }
+  .filter-chip.active.be-chip { background: rgba(255,176,0,0.15); color: #ffb000; }
+  .filter-clear {
+    background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 4px;
+    padding: 7px 11px; font-size: 11px; cursor: pointer; font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.04em; text-transform: uppercase; transition: all .12s ease;
+  }
+  .filter-clear:hover { color: var(--text); border-color: var(--muted-light); }
+  .filter-spacer { flex: 1; }
+  .filter-count { font-size: 11.5px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+  /* ── Insights Grid ── */
+  .insights-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 22px 24px; }
+  .insights-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 16px; }
+  .insights-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 720px) { .insights-grid { grid-template-columns: repeat(2, 1fr); } }
+  .insight-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; }
+  .insight-label { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .insight-value { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 700; }
+  .insight-value.pos { color: var(--text); }
+  .insight-value.neg { color: var(--red); }
+  .insight-sub { font-size: 11px; color: var(--muted-light); }
+
+  .breakdown-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .breakdown-row:last-child { border-bottom: none; }
+  .breakdown-label { width: 56px; flex-shrink: 0; font-size: 12.5px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--muted-light); }
+  .breakdown-bar-track { flex: 1; height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+  .breakdown-bar-fill { height: 100%; border-radius: 3px; background: var(--text); }
+  .breakdown-bar-fill.neg { background: var(--red); }
+  .breakdown-value { width: 84px; flex-shrink: 0; text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; font-weight: 700; }
+  .breakdown-value.pos { color: var(--text); }
+  .breakdown-value.neg { color: var(--red); }
+  .breakdown-count { width: 50px; flex-shrink: 0; text-align: right; font-size: 11px; color: var(--muted); }
+  .insights-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 18px; }
+  @media (max-width: 720px) { .insights-cols { grid-template-columns: 1fr; } }
+  .insights-col-title { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; }
+
+  /* ── Toast ── */
+  .toast-stack { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 10px; z-index: 100; }
+  .toast {
+    background: var(--panel); border: 1px solid var(--line); border-left: 2px solid var(--text);
+    border-radius: 4px; padding: 12px 18px; font-size: 13px; color: var(--text);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.6); animation: toast-in .18s ease; min-width: 200px;
+  }
+  .toast.toast-error { border-left-color: var(--red); color: #ff6b78; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ── Edit mode tweaks ── */
+  .panel-head-actions { display: flex; align-items: center; gap: 14px; }
+  .edit-trade-btn {
+    background: transparent; border: 1px solid var(--line); color: var(--muted-light); border-radius: 4px;
+    padding: 5px 11px; font-size: 11px; cursor: pointer; font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.04em; text-transform: uppercase; flex-shrink: 0; transition: all .12s ease;
+  }
+  .edit-trade-btn:hover { border-color: var(--muted-light); color: var(--text); }
+  .trade-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  /* ── kbd hint ── */
+  .kbd-hint { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px; margin-left: 8px; font-family: 'JetBrains Mono', monospace; }
+  .btn-primary .kbd-hint { color: rgba(255,255,255,0.6); border-color: rgba(255,255,255,0.3); }
+
+  /* ── Risk Bars (Drawdown / Target) ── */
+  .risk-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .risk-row { grid-template-columns: 1fr; } }
+  .risk-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+  .risk-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .risk-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; }
+  .risk-value { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; }
+  .risk-value.pos { color: var(--text); }
+  .risk-value.neg { color: var(--red); }
+  .risk-value.warn { color: #ffb020; }
+  .risk-track { height: 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; position: relative; }
+  .risk-fill { height: 100%; border-radius: 5px; transition: width .3s ease; }
+  .risk-fill.dd { background: var(--red); }
+  .risk-fill.target { background: var(--text); }
+  .risk-fill.target.passed { background: #2ecc71; }
+  .risk-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted-light); }
+  .risk-marker { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); }
+
+  /* ── Eval toggle button ── */
+  .btn-secondary {
+    display: flex; align-items: center; gap: 8px;
+    background: transparent; color: var(--muted-light);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 12px 18px; font-size: 13px; font-weight: 700;
+    cursor: pointer; transition: all .15s ease;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .btn-secondary:hover { border-color: var(--muted-light); color: var(--text); }
+  .btn-secondary.active { background: rgba(46,204,113,0.12); border-color: #2ecc71; color: #2ecc71; }
+  .topbar-actions { display: flex; align-items: center; gap: 10px; }
+
+  /* ── Payout mode ── */
+  .payout-banner {
+    background: rgba(46,204,113,0.07); border: 1px solid rgba(46,204,113,0.3); border-left: 2px solid #2ecc71;
+    border-radius: 4px; padding: 12px 18px; font-size: 12.5px; color: #6fdb9a; line-height: 1.6;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .funded-banner {
+    background: rgba(46,204,113,0.05); border: 1px solid rgba(46,204,113,0.25); border-left: 2px solid #2ecc71;
+    border-radius: 4px; padding: 12px 18px; font-size: 12.5px; color: #6fdb9a; line-height: 1.6;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .funded-banner-dot { width: 7px; height: 7px; border-radius: 50%; background: #2ecc71; box-shadow: 0 0 8px rgba(46,204,113,0.7); flex-shrink: 0; }
+  .payout-banner-clear {
+    background: none; border: 1px solid var(--line); color: var(--muted-light); border-radius: 4px;
+    padding: 6px 12px; font-size: 11px; cursor: pointer; font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.04em; text-transform: uppercase; flex-shrink: 0;
+  }
+  .payout-banner-clear:hover { border-color: var(--muted-light); color: var(--text); background: var(--panel-2); }
+  .payout-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 720px) { .payout-grid { grid-template-columns: 1fr; } }
+  .payout-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+  .payout-card-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; display: flex; align-items: center; gap: 8px; }
+  .payout-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  .payout-status-dot.ok { background: #2ecc71; box-shadow: 0 0 8px rgba(46,204,113,0.6); }
+  .payout-status-dot.fail { background: var(--red); box-shadow: 0 0 8px rgba(224,0,26,0.5); }
+  .payout-main { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 700; }
+  .payout-sub { font-size: 11.5px; color: var(--muted-light); line-height: 1.5; }
+  .payout-days { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 2px; }
+  .payout-day-pip { width: 18px; height: 18px; border-radius: 3px; border: 1px solid var(--line); background: var(--panel-2); display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--muted); }
+  .payout-day-pip.hit { background: rgba(46,204,113,0.15); border-color: #2ecc71; color: #2ecc71; }
+
+  /* ── Overlay & Panel ── */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.82); backdrop-filter: blur(4px);
+    display: flex; justify-content: center; align-items: center; z-index: 50; padding: 24px;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.8);
+    width: 460px; max-width: 92vw; max-height: 88vh; padding: 28px; overflow-y: auto; overflow-x: hidden;
+    display: flex; flex-direction: column; gap: 18px;
+  }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; font-size: 15px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-light); }
+  .icon-btn { background: none; border: none; color: var(--muted); cursor: pointer; padding: 4px; display: flex; }
+  .icon-btn:hover { color: var(--text); }
+
+  /* ── Trade-Formular: breiteres 2-Spalten-Layout statt schmaler Scroll-Box ── */
+  .panel-trade-form { width: 800px; max-width: 95vw; }
+  .trade-form-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; align-items: start; }
+  .trade-form-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+  @media (max-width: 780px) {
+    .trade-form-columns { grid-template-columns: 1fr; gap: 18px; }
+  }
+
+  /* ── Form fields ── */
+  .field { display: flex; flex-direction: column; gap: 7px; }
+  .field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+  .field input {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+    padding: 12px 14px; color: var(--text); font-size: 15px; font-family: 'JetBrains Mono', monospace;
+    outline: none; transition: border-color .15s ease; width: 100%; min-width: 0;
+  }
+  .field input:focus { border-color: var(--red); }
+  .field-error { font-size: 12px; color: var(--red); }
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; min-width: 0; }
+  .field-grid .field { min-width: 0; }
+
+  /* ── Direction Toggle ── */
+  .dir-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .dir-btn {
+    border: 1px solid var(--line); background: var(--bg); color: var(--muted);
+    border-radius: 4px; padding: 13px; font-weight: 700; font-size: 13px; cursor: pointer;
+    transition: all .15s ease; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .dir-btn.dir-long.active { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.5); color: var(--text); }
+  .dir-btn.dir-short.active { background: rgba(224,0,26,0.1); border-color: var(--red); color: var(--red); }
+  .dir-btn.res-win.active { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.5); color: var(--text); }
+  .dir-btn.res-loss.active { background: rgba(224,0,26,0.1); border-color: var(--red); color: var(--red); }
+  .dir-btn.res-be.active { background: rgba(255,176,0,0.12); border-color: #ffb000; color: #ffb000; }
+
+  /* ── Symbol Toggle ── */
+  .symbol-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .symbol-btn {
+    border: 1px solid var(--line); background: var(--bg); color: var(--muted);
+    border-radius: 4px; padding: 13px 10px; cursor: pointer;
+    transition: all .15s ease; font-family: 'JetBrains Mono', monospace;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .symbol-btn .sym-name { font-weight: 700; font-size: 14px; letter-spacing: 0.04em; }
+  .symbol-btn .sym-sub { font-size: 10.5px; color: var(--muted); letter-spacing: 0.03em; }
+  .symbol-btn.active { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.5); color: var(--text); }
+  .symbol-btn.active .sym-sub { color: var(--muted-light); }
+
+  /* ── Stepper (contracts) ── */
+  .stepper { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--bg); width: 100%; min-width: 0; }
+  .stepper button {
+    background: var(--panel-2); border: none; color: var(--muted-light); width: 40px; flex-shrink: 0; cursor: pointer;
+    font-size: 16px; font-weight: 700; font-family: 'JetBrains Mono', monospace; transition: background .15s ease;
+  }
+  .stepper button:hover { background: var(--line); color: var(--text); }
+  .stepper input {
+    border: none; background: transparent; text-align: center; flex: 1; min-width: 0; width: auto;
+    color: var(--text); font-size: 15px; font-family: 'JetBrains Mono', monospace; outline: none;
+  }
+
+  /* ── Computed summary ── */
+  .computed-box {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 14px;
+  }
+  .computed-item { display: flex; flex-direction: column; gap: 4px; align-items: center; text-align: center; }
+  .computed-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .computed-value { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700; }
+  .computed-value.pos { color: var(--text); }
+  .computed-value.neg { color: var(--red); }
+
+  /* ── Textarea / Notiz ── */
+  .field textarea {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+    padding: 12px 14px; color: var(--text); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+    outline: none; transition: border-color .15s ease; resize: vertical; min-height: 70px; line-height: 1.5;
+  }
+  .field textarea:focus { border-color: var(--red); }
+
+  /* ── Screenshot Upload ── */
+  .upload-box {
+    border: 1px dashed var(--line); border-radius: 4px; padding: 16px;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    color: var(--muted-light); font-size: 12px; cursor: pointer; transition: border-color .15s ease;
+    text-align: center;
+  }
+  .upload-box:hover { border-color: var(--muted-light); }
+  .upload-box input[type="file"] { display: none; }
+  .upload-preview { position: relative; border-radius: 4px; overflow: hidden; border: 1px solid var(--line); }
+  .upload-preview img { width: 100%; max-height: 220px; object-fit: contain; display: block; background: var(--bg); }
+  .upload-remove {
+    position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.7); border: 1px solid var(--line);
+    border-radius: 4px; color: var(--text); cursor: pointer; padding: 4px; display: flex;
+  }
+  .upload-remove:hover { color: var(--red); border-color: var(--red); }
+
+  /* ── Trade row screenshot thumbnail ── */
+  .trade-row { flex-wrap: wrap; }
+  .trade-shot-btn {
+    background: transparent; border: 1px solid var(--line); border-radius: 4px; color: var(--muted-light);
+    cursor: pointer; padding: 5px 9px; font-size: 11px; display: flex; align-items: center; gap: 5px;
+    font-family: 'JetBrains Mono', monospace; flex-shrink: 0;
+  }
+  .trade-shot-btn:hover { border-color: var(--muted-light); color: var(--text); }
+  .trade-note { width: 100%; color: var(--muted-light); font-size: 12px; line-height: 1.5; padding-top: 4px; border-top: 1px dashed var(--line); margin-top: 6px; }
+  .shot-overlay-img { max-width: 100%; max-height: 70vh; display: block; border-radius: 4px; border: 1px solid var(--line); }
+
+  /* ── Day Detail ── */
+  .daydetail { width: 480px; }
+  .daydetail-summary { display: flex; align-items: baseline; gap: 12px; font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; }
+  .daydetail-summary .pos { color: var(--text); }
+  .daydetail-summary .neg { color: var(--red); }
+  .daydetail-summary .muted { font-size: 14px; color: var(--muted-light); font-weight: 400; }
+  .trade-list { display: flex; flex-direction: column; gap: 8px; }
+  .trade-row {
+    display: flex; align-items: center; gap: 12px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 12px 14px; font-size: 13.5px;
+  }
+  .dir-tag { font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 3px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .dir-tag.dir-long { background: rgba(255,255,255,0.08); color: var(--text); border: 1px solid rgba(255,255,255,0.2); }
+  .dir-tag.dir-short { background: rgba(224,0,26,0.12); color: var(--red); border: 1px solid rgba(224,0,26,0.3); }
+  .trade-meta { color: var(--muted-light); flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .trade-pnl { font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+  .trade-pnl.pos { color: var(--text); }
+  .trade-pnl.neg { color: var(--red); }
+  .delete-btn { color: var(--muted); flex-shrink: 0; }
+  .delete-btn:hover { color: var(--red); }
+  .trade-row-confirm { justify-content: space-between; }
+  .confirm-btn {
+    border: 1px solid var(--line); border-radius: 4px; padding: 7px 13px;
+    font-size: 12px; font-weight: 700; cursor: pointer; background: transparent;
+    color: var(--muted-light); flex-shrink: 0; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .confirm-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .confirm-yes { border-color: var(--red); color: var(--red); }
+  .confirm-yes:hover { background: rgba(224,0,26,0.12); }
+  .confirm-no:hover { background: var(--panel-2); }
+
+  /* ── Confluences ── */
+  .confluence-groups { display: flex; flex-direction: column; gap: 9px; }
+  .confluence-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .confluence-group-label { width: 172px; flex-shrink: 0; font-size: 11px; color: var(--muted-light); font-weight: 700; letter-spacing: 0.02em; }
+  .confluence-group-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  @media (max-width: 720px) {
+    .confluence-group { flex-direction: column; align-items: flex-start; gap: 5px; }
+    .confluence-group-label { width: auto; }
+  }
+  .confluence-chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .confluence-chip {
+    border: 1px solid var(--line); background: var(--bg); color: var(--muted-light);
+    border-radius: 20px; padding: 8px 14px; font-size: 12px; font-weight: 700; cursor: pointer;
+    transition: all .12s ease; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.02em;
+  }
+  .confluence-chip:hover { border-color: var(--muted-light); color: var(--text); }
+  .confluence-chip.active { background: rgba(46,204,113,0.12); border-color: #2ecc71; color: #2ecc71; }
+  .confluence-add-row { display: flex; gap: 8px; margin-top: 4px; }
+  .confluence-add-row input {
+    flex: 1; background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+    padding: 10px 12px; color: var(--text); font-size: 13px; font-family: 'JetBrains Mono', monospace;
+    outline: none; transition: border-color .15s ease; min-width: 0;
+  }
+  .confluence-add-row input:focus { border-color: var(--red); }
+  .confluence-add-btn {
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--muted-light);
+    border-radius: 4px; width: 40px; flex-shrink: 0; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all .12s ease;
+  }
+  .confluence-add-btn:hover { border-color: var(--muted-light); color: var(--text); }
+  .confluence-tags { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; margin-top: 4px; }
+  .confluence-chip-sm {
+    background: rgba(46,204,113,0.08); border: 1px solid rgba(46,204,113,0.25); color: #6fdb9a;
+    border-radius: 12px; padding: 2px 9px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ── Forward Test Panel ── */
+  .ft-panel { width: 640px; }
+  .ft-results { display: flex; flex-direction: column; gap: 6px; }
+  .ft-section-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 2px; }
+  .ft-section-divider { border-top: 1px solid var(--line); margin: 6px 0 2px; }
+
+  @media (max-width: 720px) {
+    .stat-row { grid-template-columns: repeat(2, 1fr); }
+    .cal-grid-header, .cal-week { grid-template-columns: repeat(7, minmax(0,1fr)); }
+    .cal-dow-week, .cal-weeksum { display: none; }
+    .journal-shell { padding: 16px; }
+    .filter-bar { width: 100%; }
+    .filter-group { flex: 1; justify-content: space-between; }
+    .breakdown-label { width: 44px; font-size: 11.5px; }
+    .breakdown-value { width: 70px; font-size: 11.5px; }
+    .toast-stack { left: 16px; right: 16px; bottom: 16px; }
+    .toast { min-width: 0; }
+    .kbd-hint { display: none; }
+    .topbar { flex-wrap: wrap; gap: 14px; }
+    .topbar-actions { width: 100%; }
+    .btn-secondary, .topbar-actions .btn-primary { flex: 1; justify-content: center; }
+  }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<!-- React + Babel via CDN: kein Build-Schritt nötig -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useCallback } = React;
+
+/* ============================================================
+   TRADING JOURNAL — Konfiguration
+   Trag hier deine Supabase Project URL und den anon Key ein.
+   Findest du in: Supabase -> Project Settings -> API
+   ============================================================ */
+
+const SUPABASE_URL = "https://pjywivxovkjkzydmjftp.supabase.co"; // <-- HIER EINTRAGEN
+const SUPABASE_ANON_KEY = "sb_publishable_xwsKMkeuBJmza9u9W24AIw_dQMEb14r"; // <-- HIER EINTRAGEN
+const STARTING_BALANCE = 50000;
+// Trades vor diesem Datum zaehlen nicht mehr in die Performance-Stats (Profit Factor,
+// Winrate, Avg RR, Streaks, Bester/Schlechtester Trade, Nach-Wochentag etc.), bleiben
+// aber im Kalender sichtbar und im Account-Balance/Drawdown vollstaendig enthalten.
+const STATS_CUTOFF_DATE = "2026-09-01";
+// Bekannte reale Funded-Balance zum Zeitpunkt der Wiederherstellung (fundedActivatedAt),
+// falls die Trade-Historie davor im Journal nicht (mehr) einzeln nachvollzogen werden
+// kann. Ersetzt STARTING_BALANCE als Ausgangspunkt fuer die Funded-Stage-Balance/
+// Drawdown-Berechnung, damit die Balance korrekt weiterlaeuft, ohne die alten Trades
+// erneut einzeln erfassen zu muessen. Auf STARTING_BALANCE setzen, um das zu deaktivieren.
+const FUNDED_BALANCE_OVERRIDE = 48224;
+
+/* Optional, aber empfohlen: lege in Supabase eine Spalte "realized_rr" (Typ: float8,
+   nullable) in der Tabelle "Trades" an, damit der realisierte RR-Wert dauerhaft
+   gespeichert wird (sonst fällt die App automatisch auf einen Live-Fallback ohne
+   Persistenz dieses Feldes zurück):
+   ALTER TABLE "Trades" ADD COLUMN realized_rr float8;
+
+   Ebenfalls optional, aber empfohlen: Spalte "setup" (Typ: text, nullable), damit
+   jeder Trade einem Setup aus 02 Strategien & Setups zugeordnet werden kann. Ohne
+   diese Spalte fällt das Speichern automatisch auf ein Payload ohne "setup" zurück:
+   ALTER TABLE "Trades" ADD COLUMN setup text;
+
+   Ebenfalls optional, aber empfohlen: Spalte "confluences" (Typ: text[], nullable),
+   damit pro Trade mehrere Confluence-Kriterien gespeichert werden können (Basis für
+   die Confluence-Auswertung und den Forward Test). Ohne diese Spalte fällt das
+   Speichern automatisch auf ein Payload ohne "confluences" zurück:
+   ALTER TABLE "Trades" ADD COLUMN confluences text[];
+*/
+
+/* ── Account-Regeln (Eval-Phase) ──
+   Trailing Drawdown auf EOD-Basis, gecappt: die Minimum Loss Line (MLL)
+   steigt mit dem höchsten je erreichten EOD-Stand mit, aber nur bis zu
+   einem Equity-Cap von 52.000 — danach bleibt die MLL fix bei 50.000,
+   auch wenn die Equity weiter steigt.
+*/
+const DD_BUFFER = 2000;
+const DD_PEAK_CAP = 52000; // ab diesem EOD-Peak greift die MLL nicht weiter mit
+const ACCOUNT_PASS_TARGET = 53000; // Equity-Ziel, ab dem der Account "passed" ist
+
+/* ── Payout-Phase (nach Eval Passed) ──
+   5 Trading-Tage mit jeweils min. 250$ Tagesgewinn (nicht am Stück),
+   50%-Consistency-Regel (kein Tag > 50% des Gesamtgewinns seit Pass),
+   Trailing-DD-Cap endet bei 52.100.
+*/
+const PAYOUT_MIN_DAY_PROFIT = 250;
+const PAYOUT_MIN_DAYS = 5;
+const PAYOUT_CONSISTENCY_PCT = 50;
+const PAYOUT_DD_PEAK_CAP = 52100;
+
+// Mindestanzahl an Trades, ab der eine Confluence-Kombination im "Top-Kombinationen"-Ranking
+// berücksichtigt wird — verhindert, dass 1-2 Zufallstreffer als "100% Winrate" auftauchen.
+const MIN_COMBO_SAMPLE = 3;
+
+// Vordefinierte Confluence-Vorschläge, passend zur eigenen Fib-/Zonen-Strategie.
+// Als Kategorien organisiert (Fib Retracement / Fib Extension / Trendbasierte Fib
+// Extension / Zonen-Indikator), pro Kategorie mit x1–x3 für die Anzahl an Levels,
+// die an derselben Range/Zone alignen. Werden im Formular als kompakte Zeilen
+// dargestellt (Label + Chips daneben), kein Aufklappen nötig.
+const CONFLUENCE_CATEGORIES = [
+  { label: "Fib Retracement", levels: ["x1", "x2", "x3", "x4"] },
+  { label: "Fib Extension", levels: ["x1", "x2", "x3", "x4"] },
+  { label: "Trendbasierte Fib Extension", levels: ["x1", "x2", "x3", "x4"] },
+  { label: "Zonen-Indikator", levels: ["Reversal", "HOD / LOD"] },
+];
+const DEFAULT_CONFLUENCES = CONFLUENCE_CATEGORIES.flatMap((cat) =>
+  cat.levels.map((level) => `${cat.label} ${level}`)
+);
+
+const REST_URL = `${SUPABASE_URL}/rest/v1/Trades`;
+
+const sbHeaders = {
+  apikey: SUPABASE_ANON_KEY,
+  Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+  "Content-Type": "application/json",
+  Prefer: "return=representation",
+};
+
+const isConfigured =
+  !SUPABASE_URL.includes("DEIN-PROJEKT") && !SUPABASE_ANON_KEY.includes("DEIN-ANON-KEY");
+
+const fmtMoney = (n) =>
+  (n < 0 ? "-" : "") +
+  "$" +
+  Math.abs(n).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const fmtMoneyShort = (n) => {
+  const sign = n < 0 ? "-" : "+";
+  const abs = Math.abs(n);
+  return `${sign}$${abs.toLocaleString("de-DE", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+};
+
+const SYMBOLS = {
+  NQ: { label: "NQ", sub: "20$ / Punkt / Contract", perPoint: 20, defaultContracts: 1 },
+  MNQ: { label: "MNQ", sub: "2$ / Punkt / Contract", perPoint: 2, defaultContracts: 5 },
+};
+
+function computeTrade({ symbol, contracts, stop_loss, take_profit, result }) {
+  const cfg = SYMBOLS[symbol] || SYMBOLS.NQ;
+  const c = Number(contracts) || 0;
+  const sl = stop_loss === "" || stop_loss === null ? null : Number(stop_loss);
+  const tp = take_profit === "" || take_profit === null ? null : Number(take_profit);
+
+  const risk_amount = sl !== null ? Math.abs(sl) * cfg.perPoint * c : null;
+  const reward_amount = tp !== null ? Math.abs(tp) * cfg.perPoint * c : null;
+  const rr = risk_amount && reward_amount ? reward_amount / risk_amount : null;
+
+  let pnl = null;
+  if (result === "win" && reward_amount !== null) pnl = reward_amount;
+  if (result === "loss" && risk_amount !== null) pnl = -risk_amount;
+  if (result === "be") pnl = 0;
+
+  // realized_rr: Der TATSÄCHLICH erzielte RR-Wert für die Statistik.
+  // Win  -> geplantes RR (reward/risk), wie gewohnt
+  // Loss -> immer exakt -1, unabhängig davon wie groß das geplante RR war
+  //         (ein Trade, der für 30RR geplant war aber in den SL läuft, zählt als -1RR, nicht -30RR)
+  let realized_rr = null;
+  if (result === "win") realized_rr = rr;
+  else if (result === "loss") realized_rr = rr !== null ? -1 : null;
+  else if (result === "be") realized_rr = 0;
+
+  return { risk_amount, reward_amount, rr, realized_rr, pnl };
+}
+
+const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const MONTHS = [
+  "Januar", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember",
+];
+
+function startOfMonth(year, month) {
+  return new Date(year, month, 1);
+}
+function daysInMonth(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+function mondayIndex(date) {
+  return (date.getDay() + 6) % 7;
+}
+function isoDate(year, month, day) {
+  const m = String(month + 1).padStart(2, "0");
+  const d = String(day).padStart(2, "0");
+  return `${year}-${m}-${d}`;
+}
+function isoWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dayNum + 3);
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const week =
+    1 +
+    Math.round(
+      ((d.getTime() - firstThursday.getTime()) / 86400000 -
+        3 +
+        ((firstThursday.getUTCDay() + 6) % 7)) /
+        7
+    );
+  return week;
+}
+
+const Icon = {
+  Plus: (p) => (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" {...p}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  ),
+  Close: (p) => (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" {...p}>
+      <path d="M18 6L6 18M6 6l12 12" />
+    </svg>
+  ),
+  ChevL: (p) => (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M15 18l-6-6 6-6" />
+    </svg>
+  ),
+  ChevR: (p) => (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M9 6l6 6-6 6" />
+    </svg>
+  ),
+  Up: (p) => (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M5 15l7-7 7 7" />
+    </svg>
+  ),
+  Down: (p) => (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M5 9l7 7 7-7" />
+    </svg>
+  ),
+  Trash: (p) => (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6h16Z" />
+    </svg>
+  ),
+  Image: (p) => (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <path d="M21 15l-5-5L5 21" />
+    </svg>
+  ),
+  Upload: (p) => (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+    </svg>
+  ),
+  Edit: (p) => (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+    </svg>
+  ),
+};
+
+function useToasts() {
+  const [toasts, setToasts] = useState([]);
+  const push = useCallback((message, type = "ok") => {
+    const id = Math.random().toString(36).slice(2);
+    setToasts((t) => [...t, { id, message, type }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
+  }, []);
+  return { toasts, push };
+}
+
+const WEEKDAY_FULL = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
+
+function TradingJournal() {
+  const [trades, setTrades] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [forwardTestOpen, setForwardTestOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [cursor, setCursor] = useState(() => {
+    const n = new Date();
+    return { year: n.getFullYear(), month: n.getMonth() };
+  });
+  const [dayDetail, setDayDetail] = useState(null);
+  const [editingTrade, setEditingTrade] = useState(null);
+  const [filterSymbol, setFilterSymbol] = useState("all");
+  const [filterResult, setFilterResult] = useState("all");
+  const { toasts, push: pushToast } = useToasts();
+
+  // ── Funded Stage: wird einmalig aktiviert sobald Balance >= 53k ──
+  // Ab diesem Zeitpunkt startet der Account neu auf 50k.
+  // Alte (Eval-)Trades bleiben im Kalender sichtbar, aber ihr PnL
+  // fliesst nicht mehr in die neue Balance ein.
+  // fundedActivatedAt: ISO-datetime des Klicks — Trades mit created_at DAVOR sind Eval.
+  const [fundedStage, setFundedStage] = useState(() => {
+    try { return localStorage.getItem("journal_funded_stage") === "1"; } catch { return false; }
+  });
+  const [fundedStartDate, setFundedStartDate] = useState(() => {
+    try { return localStorage.getItem("journal_funded_start_date") || null; } catch { return null; }
+  });
+  const [fundedActivatedAt, setFundedActivatedAt] = useState(() => {
+    try { return localStorage.getItem("journal_funded_activated_at") || null; } catch { return null; }
+  });
+
+  const evalPassed = fundedStage;
+  const evalPassedDate = fundedStartDate;
+
+  const activateFundedStage = useCallback(() => {
+    const d = new Date().toISOString().slice(0, 10);
+    const dt = new Date().toISOString();
+    try {
+      localStorage.setItem("journal_funded_stage", "1");
+      localStorage.setItem("journal_funded_start_date", d);
+      localStorage.setItem("journal_funded_activated_at", dt);
+    } catch {}
+    setFundedStage(true);
+    setFundedStartDate(d);
+    setFundedActivatedAt(dt);
+    pushToast("Funded Stage aktiviert — Account startet neu auf $50.000");
+  }, [pushToast]);
+
+  // Pausiert die Funded Stage OHNE das urspruengliche Start-/Aktivierungsdatum zu
+  // loeschen — so bleibt ein spaeteres "Zurueck zur Funded Stage" (reactivateFundedStage)
+  // exakt und der Kalender wird durch ein versehentliches Umschalten nicht verfaelscht.
+  const resetToEvalStage = useCallback(() => {
+    try {
+      localStorage.setItem("journal_funded_stage", "0");
+    } catch {}
+    setFundedStage(false);
+    pushToast("Zurueck zur Eval Stage");
+  }, [pushToast]);
+
+  // Aktiviert die Funded Stage erneut MIT dem bereits gespeicherten Start-/
+  // Aktivierungsdatum (kein neuer Zeitstempel) — dafuer muss kein neuer Trade
+  // eingetragen werden und der Kalender bleibt akkurat.
+  const reactivateFundedStage = useCallback(() => {
+    try {
+      localStorage.setItem("journal_funded_stage", "1");
+    } catch {}
+    setFundedStage(true);
+    pushToast("Funded Stage wieder aktiv");
+  }, [pushToast]);
+
+  // Einmalige Wiederherstellung fuer den Fall, dass Start-/Aktivierungsdatum bereits
+  // verloren gegangen sind (z. B. durch eine alte Version dieses Buttons). Nimmt ein
+  // vom Nutzer eingetragenes Datum/Uhrzeit entgegen und setzt Funded Stage darauf.
+  const restoreFundedStage = useCallback((dateTimeLocal) => {
+    if (!dateTimeLocal) return;
+    const dt = new Date(dateTimeLocal).toISOString();
+    const d = dt.slice(0, 10);
+    try {
+      localStorage.setItem("journal_funded_stage", "1");
+      localStorage.setItem("journal_funded_start_date", d);
+      localStorage.setItem("journal_funded_activated_at", dt);
+    } catch {}
+    setFundedStage(true);
+    setFundedStartDate(d);
+    setFundedActivatedAt(dt);
+    pushToast("Funded Stage wiederhergestellt");
+  }, [pushToast]);
+
+  const filteredTrades = useMemo(() => {
+    return trades.filter((t) => {
+      if (filterSymbol !== "all" && t.symbol !== filterSymbol) return false;
+      if (filterResult !== "all" && t.result !== filterResult) return false;
+      return true;
+    });
+  }, [trades, filterSymbol, filterResult]);
+
+  const hasActiveFilters = filterSymbol !== "all" || filterResult !== "all";
+
+  // Bereits verwendete Setup-Namen (für Autovervollständigung im Formular)
+  const existingSetups = useMemo(() => {
+    const set = new Set();
+    trades.forEach((t) => { if (t.setup) set.add(t.setup); });
+    return Array.from(set).sort();
+  }, [trades]);
+
+  // Bereits verwendete Confluence-Tags (für Mehrfachauswahl im Formular & Forward Test)
+  const existingConfluences = useMemo(() => {
+    const set = new Set();
+    trades.forEach((t) => {
+      (Array.isArray(t.confluences) ? t.confluences : []).forEach((c) => set.add(c));
+    });
+    return Array.from(set).sort();
+  }, [trades]);
+
+  // Confluence-Vorschläge im Formular: die vordefinierten Fib-/Zonen-Tags zuerst,
+  // danach zusätzlich alle bereits manuell vergebenen Tags aus der Historie.
+  const confluenceOptions = useMemo(() => {
+    const combined = [...DEFAULT_CONFLUENCES];
+    existingConfluences.forEach((c) => { if (!combined.includes(c)) combined.push(c); });
+    return combined;
+  }, [existingConfluences]);
+
+
+  // Realisierter RR-Wert eines Trades (Win = geplantes RR, Loss = immer -1, BE = 0)
+  const realizedRRForTrade = useCallback((t) => {
+    if (t.result === "be") return 0;
+    if (t.realized_rr !== null && t.realized_rr !== undefined) return Number(t.realized_rr);
+    if (t.result === "loss") return t.rr !== null && t.rr !== undefined ? -1 : null;
+    if (t.result === "win") return t.rr !== null && t.rr !== undefined ? Number(t.rr) : null;
+    return null;
+  }, []);
+
+  // Realisierte Punkte eines Trades (Win = TP-Punkte, Loss = -SL-Punkte, BE = 0)
+  const realizedPointsForTrade = useCallback((t) => {
+    if (t.result === "win") return t.take_profit !== null && t.take_profit !== undefined ? Number(t.take_profit) : null;
+    if (t.result === "loss") return t.stop_loss !== null && t.stop_loss !== undefined ? -Math.abs(Number(t.stop_loss)) : null;
+    if (t.result === "be") return 0;
+    return null;
+  }, []);
+
+  // ── Confluence-Auswertung ──
+  // Über die GESAMTE Historie (nicht nur Funded-Stage), damit die statistische
+  // Basis für die Strategie-Validierung möglichst groß bleibt. Respektiert aber
+  // die Symbol-/Ergebnis-Filter aus der Filterleiste.
+  const confluenceStats = useMemo(() => {
+    const map = new Map();
+    filteredTrades.forEach((t) => {
+      const tags = Array.isArray(t.confluences) ? t.confluences : [];
+      tags.forEach((tag) => {
+        if (!map.has(tag)) {
+          map.set(tag, { tag, count: 0, wins: 0, losses: 0, bes: 0, rrSum: 0, rrCount: 0, ptsSum: 0, ptsCount: 0, pnlSum: 0 });
+        }
+        const e = map.get(tag);
+        e.count += 1;
+        e.pnlSum += Number(t.pnl || 0);
+        if (t.result === "win") e.wins += 1;
+        else if (t.result === "loss") e.losses += 1;
+        else if (t.result === "be") e.bes += 1;
+        const rr = realizedRRForTrade(t);
+        if (rr !== null && !Number.isNaN(rr)) { e.rrSum += rr; e.rrCount += 1; }
+        const pts = realizedPointsForTrade(t);
+        if (pts !== null && !Number.isNaN(pts)) { e.ptsSum += pts; e.ptsCount += 1; }
+      });
+    });
+    return Array.from(map.values())
+      .map((e) => {
+        const decided = e.wins + e.losses;
+        return {
+          ...e,
+          winrate: decided ? (e.wins / decided) * 100 : 0,
+          avgRR: e.rrCount ? e.rrSum / e.rrCount : 0,
+          avgPoints: e.ptsCount ? e.ptsSum / e.ptsCount : 0,
+        };
+      })
+      .sort((a, b) => b.count - a.count);
+  }, [filteredTrades, realizedRRForTrade, realizedPointsForTrade]);
+  const maxConfluenceCount = Math.max(1, ...confluenceStats.map((c) => c.count));
+
+  // ── Setup-Auswertung ──
+  // Analog zur Confluence-Analyse, aber nach dem (einzelnen) Setup-Feld gruppiert.
+  // Respektiert ebenfalls die Symbol-/Ergebnis-Filter aus der Filterleiste.
+  const setupStats = useMemo(() => {
+    const map = new Map();
+    filteredTrades.forEach((t) => {
+      if (!t.setup) return;
+      if (!map.has(t.setup)) {
+        map.set(t.setup, { setup: t.setup, count: 0, wins: 0, losses: 0, bes: 0, rrSum: 0, rrCount: 0, pnlSum: 0 });
+      }
+      const e = map.get(t.setup);
+      e.count += 1;
+      e.pnlSum += Number(t.pnl || 0);
+      if (t.result === "win") e.wins += 1;
+      else if (t.result === "loss") e.losses += 1;
+      else if (t.result === "be") e.bes += 1;
+      const rr = realizedRRForTrade(t);
+      if (rr !== null && !Number.isNaN(rr)) { e.rrSum += rr; e.rrCount += 1; }
+    });
+    return Array.from(map.values())
+      .map((e) => {
+        const decided = e.wins + e.losses;
+        return { ...e, winrate: decided ? (e.wins / decided) * 100 : 0, avgRR: e.rrCount ? e.rrSum / e.rrCount : 0 };
+      })
+      .sort((a, b) => b.count - a.count);
+  }, [filteredTrades, realizedRRForTrade]);
+  const maxSetupCount = Math.max(1, ...setupStats.map((s) => s.count));
+
+  // ── Top Confluence-Kombinationen ──
+  // Berechnet für jede 2er- und 3er-Kombination von Confluences, die in mindestens
+  // MIN_COMBO_SAMPLE Trades gemeinsam vorkamen, Winrate und Ø RR — auf Basis der
+  // KOMPLETTEN Historie (nicht gefiltert), damit z. B. ein blind genommener Einzel-Trigger
+  // (nur 1 von mehreren Confluences) das Ranking der vollständigen Kombination nicht verwässert.
+  const comboStats = useMemo(() => {
+    const map = new Map();
+    trades.forEach((t) => {
+      const tags = Array.isArray(t.confluences) ? Array.from(new Set(t.confluences)).sort() : [];
+      if (tags.length < 2) return;
+      const combos = [];
+      for (let i = 0; i < tags.length; i++) {
+        for (let j = i + 1; j < tags.length; j++) {
+          combos.push([tags[i], tags[j]]);
+          for (let k = j + 1; k < tags.length; k++) {
+            combos.push([tags[i], tags[j], tags[k]]);
+          }
+        }
+      }
+      combos.forEach((combo) => {
+        const key = combo.join(" + ");
+        if (!map.has(key)) {
+          map.set(key, { key, size: combo.length, count: 0, wins: 0, losses: 0, bes: 0, rrSum: 0, rrCount: 0 });
+        }
+        const e = map.get(key);
+        e.count += 1;
+        if (t.result === "win") e.wins += 1;
+        else if (t.result === "loss") e.losses += 1;
+        else if (t.result === "be") e.bes += 1;
+        const rr = realizedRRForTrade(t);
+        if (rr !== null && !Number.isNaN(rr)) { e.rrSum += rr; e.rrCount += 1; }
+      });
+    });
+    return Array.from(map.values())
+      .filter((e) => e.count >= MIN_COMBO_SAMPLE)
+      .map((e) => {
+        const decided = e.wins + e.losses;
+        return { ...e, winrate: decided ? (e.wins / decided) * 100 : 0, avgRR: e.rrCount ? e.rrSum / e.rrCount : 0 };
+      })
+      .sort((a, b) => b.winrate - a.winrate || b.avgRR - a.avgRR)
+      .slice(0, 8);
+  }, [trades, realizedRRForTrade]);
+
+  const dayDetailData = useMemo(() => {
+    if (!dayDetail) return null;
+    const dayTrades = filteredTrades.filter((t) => t.trade_date === dayDetail);
+    const pnl = dayTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
+    const isHistoric = fundedStage && fundedActivatedAt
+      ? dayTrades.length > 0 && dayTrades.every((t) => !t.created_at || t.created_at < fundedActivatedAt)
+      : false;
+    return { iso: dayDetail, trades: dayTrades, pnl, isHistoric };
+  }, [dayDetail, filteredTrades, fundedStage, fundedActivatedAt]);
+
+  const loadTrades = useCallback(async () => {
+    if (!isConfigured) {
+      setLoading(false);
+      return;
+    }
+    setError(null);
+    try {
+      const res = await fetch(`${REST_URL}?select=*&order=trade_date.asc`, {
+        headers: sbHeaders,
+      });
+      if (!res.ok) throw new Error(`Supabase Fehler ${res.status}`);
+      const data = await res.json();
+      setTrades(data);
+    } catch (e) {
+      setError(e.message || "Verbindung zu Supabase fehlgeschlagen");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTrades();
+  }, [loadTrades]);
+
+  const stats = useMemo(() => {
+    const sorted = [...filteredTrades].sort(
+      (a, b) => new Date(a.trade_date) - new Date(b.trade_date) || a.id - b.id
+    );
+
+    // In der Funded Stage zaehlen nur Trades die NACH dem Aktivierungs-Zeitpunkt
+    // gespeichert wurden. So werden Eval-Trades vom selben Tag korrekt ausgeschlossen.
+    const fundedTrades = fundedStage && fundedActivatedAt
+      ? sorted.filter((t) => t.created_at && t.created_at >= fundedActivatedAt)
+      : sorted;
+    const evalHistoricTrades = fundedStage && fundedActivatedAt
+      ? sorted.filter((t) => !t.created_at || t.created_at < fundedActivatedAt)
+      : [];
+
+    // Alte-Strategie-Cutoff: fuer die Performance-Stats zaehlen nur Trades ab
+    // STATS_CUTOFF_DATE. totalPnl/balance bleiben unten bewusst auf Basis ALLER
+    // fundedTrades, damit sie (falls je referenziert) konsistent zum echten Konto bleiben.
+    const statsTrades = fundedTrades.filter((t) => t.trade_date >= STATS_CUTOFF_DATE);
+
+    const totalPnl = fundedTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
+    const balance = STARTING_BALANCE + totalPnl;
+
+    const wins = statsTrades.filter((t) => t.result === "win" || (t.result !== "loss" && t.result !== "be" && Number(t.pnl) > 0));
+    const losses = statsTrades.filter((t) => t.result === "loss" || (t.result !== "win" && t.result !== "be" && Number(t.pnl) < 0));
+    const bes = statsTrades.filter((t) => t.result === "be");
+    const decidedTrades = statsTrades.filter((t) => t.result !== "be");
+    const winrate = decidedTrades.length ? (wins.length / decidedTrades.length) * 100 : 0;
+
+    const grossProfit = wins.reduce((s, t) => s + Number(t.pnl), 0);
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + Number(t.pnl), 0));
+    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+
+    // Avg. RR auf Basis des REALISIERTEN RR: Win = geplantes reward/risk, Loss = immer exakt -1
+    const realizedRRValues = statsTrades
+      .map((t) => {
+        if (t.result === "be") return 0;
+        if (t.realized_rr !== null && t.realized_rr !== undefined) return Number(t.realized_rr);
+        if (t.result === "loss") return t.rr !== null && t.rr !== undefined ? -1 : null;
+        if (t.result === "win") return t.rr !== null && t.rr !== undefined ? Number(t.rr) : null;
+        return null;
+      })
+      .filter((v) => v !== null && v !== undefined && !Number.isNaN(v));
+    const avgRR = realizedRRValues.length
+      ? realizedRRValues.reduce((s, r) => s + r, 0) / realizedRRValues.length
+      : 0;
+
+    // Expectancy: durchschnittlicher $-Ertrag pro entschiedenem Trade (Win/Loss, ohne BE).
+    // Mathematisch identisch zu (Winrate * Ø-Gewinn) - (Verlustrate * Ø-Verlust), aber einfacher
+    // zu berechnen: einfach der Netto-PnL aller entschiedenen Trades geteilt durch ihre Anzahl.
+    const expectancy = decidedTrades.length
+      ? decidedTrades.reduce((s, t) => s + Number(t.pnl || 0), 0) / decidedTrades.length
+      : 0;
+
+    let running = STARTING_BALANCE;
+    let peak = STARTING_BALANCE;
+    let maxDrawdown = 0;
+    let maxDrawdownPct = 0;
+    const equityCurve = [{ x: 0, y: running }];
+    statsTrades.forEach((t, i) => {
+      running += Number(t.pnl || 0);
+      equityCurve.push({ x: i + 1, y: running });
+      if (running > peak) peak = running;
+      const dd = peak - running;
+      const ddPct = peak > 0 ? (dd / peak) * 100 : 0;
+      if (dd > maxDrawdown) {
+        maxDrawdown = dd;
+        maxDrawdownPct = ddPct;
+      }
+    });
+
+    // ── EOD-Trading-Tage (für Drawdown, Streaks pro Tag, Payout-Regeln) ──
+    // Trades werden zu Kalendertagen aggregiert, dann chronologisch sortiert.
+    const dayMap = new Map();
+    statsTrades.forEach((t) => {
+      const d = t.trade_date;
+      if (!dayMap.has(d)) dayMap.set(d, { date: d, pnl: 0, count: 0 });
+      const entry = dayMap.get(d);
+      entry.pnl += Number(t.pnl || 0);
+      entry.count += 1;
+    });
+    const tradingDays = Array.from(dayMap.values()).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    // ── EOD Trailing Drawdown mit Equity-Cap ──
+    // Die MLL (Minimum Loss Line) folgt dem höchsten je erreichten EOD-Stand,
+    // deckelt aber bei DD_PEAK_CAP (52.000) — danach bleibt sie fix bei 50.000,
+    // auch wenn die Equity weiter über den Cap steigt. Das bedeutet: der reale
+    // Puffer (eodBalance - mll) kann dann größer als DD_BUFFER (2.000) werden.
+    let eodPeak = STARTING_BALANCE;
+    let eodBalance = STARTING_BALANCE;
+    tradingDays.forEach((d) => {
+      eodBalance += d.pnl;
+      if (eodBalance > eodPeak) eodPeak = eodBalance;
+    });
+    const cappedPeak = Math.min(eodPeak, DD_PEAK_CAP);
+    const mll = cappedPeak - DD_BUFFER;
+    const ddBufferRemaining = balance - mll; // wie viel Puffer noch bis zur MLL übrig ist
+    // Für die Balken-Visualisierung: wie nah ist die Equity an der MLL, bezogen auf die
+    // größte sinnvolle Spanne (eodPeak - mll). Am Peak = 0% Risiko, an der MLL = 100%.
+    const ddMaxSpan = Math.max(1, eodPeak - mll);
+    const ddRiskPct = Math.max(0, Math.min(100, 100 - (ddBufferRemaining / ddMaxSpan) * 100));
+
+    // ── Distanz zum Account-Pass-Ziel (53.000) ──
+    const distanceToPass = Math.max(0, ACCOUNT_PASS_TARGET - balance);
+    const passProgressPct = Math.max(0, Math.min(100, (balance / ACCOUNT_PASS_TARGET) * 100));
+    const accountPassed = balance >= ACCOUNT_PASS_TARGET;
+
+    // Streaks (aktuell & längste)
+    let currentStreak = 0;
+    let currentStreakType = null;
+    let longestWinStreak = 0;
+    let longestLossStreak = 0;
+    let curWin = 0;
+    let curLoss = 0;
+    statsTrades.forEach((t) => {
+      const pnl = Number(t.pnl || 0);
+      if (pnl > 0) {
+        curWin += 1;
+        curLoss = 0;
+        if (curWin > longestWinStreak) longestWinStreak = curWin;
+      } else if (pnl < 0) {
+        curLoss += 1;
+        curWin = 0;
+        if (curLoss > longestLossStreak) longestLossStreak = curLoss;
+      }
+    });
+    if (statsTrades.length) {
+      const lastPnl = Number(statsTrades[statsTrades.length - 1].pnl || 0);
+      currentStreakType = lastPnl > 0 ? "win" : lastPnl < 0 ? "loss" : null;
+      for (let i = statsTrades.length - 1; i >= 0; i--) {
+        const p = Number(statsTrades[i].pnl || 0);
+        if (currentStreakType === "win" && p > 0) currentStreak++;
+        else if (currentStreakType === "loss" && p < 0) currentStreak++;
+        else break;
+      }
+    }
+
+    const bestTrade = wins.length ? wins.reduce((a, b) => (Number(a.pnl) > Number(b.pnl) ? a : b)) : null;
+    const worstTrade = losses.length ? losses.reduce((a, b) => (Number(a.pnl) < Number(b.pnl) ? a : b)) : null;
+
+    // Breakdown nach Symbol
+    const bySymbol = {};
+    statsTrades.forEach((t) => {
+      const key = t.symbol || "—";
+      if (!bySymbol[key]) bySymbol[key] = { pnl: 0, count: 0 };
+      bySymbol[key].pnl += Number(t.pnl || 0);
+      bySymbol[key].count += 1;
+    });
+
+    // Breakdown nach Wochentag
+    const byWeekday = WEEKDAY_FULL.map((label) => ({ label, pnl: 0, count: 0 }));
+    statsTrades.forEach((t) => {
+      const d = new Date(t.trade_date + "T00:00:00");
+      const idx = (d.getDay() + 6) % 7;
+      byWeekday[idx].pnl += Number(t.pnl || 0);
+      byWeekday[idx].count += 1;
+    });
+
+    const maxAbsSymbolPnl = Math.max(1, ...Object.values(bySymbol).map((v) => Math.abs(v.pnl)));
+    const maxAbsWeekdayPnl = Math.max(1, ...byWeekday.map((v) => Math.abs(v.pnl)));
+
+    return {
+      totalPnl, balance, winrate, profitFactor, avgRR, expectancy, equityCurve, count: statsTrades.length,
+      decidedTrades, bes,
+      evalHistoricTrades,
+      maxDrawdown, maxDrawdownPct, currentStreak, currentStreakType,
+      longestWinStreak, longestLossStreak, bestTrade, worstTrade,
+      bySymbol, byWeekday, maxAbsSymbolPnl, maxAbsWeekdayPnl,
+      tradingDays, eodPeak, eodBalance, mll, ddBufferRemaining, ddRiskPct,
+      distanceToPass, passProgressPct, accountPassed,
+    };
+  }, [filteredTrades, fundedStage, fundedActivatedAt]);
+
+  // ── Account-Stats (IMMER auf Basis ALLER Trades, unabhängig von Symbol-/Ergebnis-Filtern) ──
+  // Balance, Equity-Kurve, Drawdown/MLL und Pass-Status sind reale Kontokennzahlen.
+  // Sie dürfen sich NICHT ändern, nur weil der Nutzer die Filterleiste (Symbol/Ergebnis)
+  // zum Browsen des Kalenders/der Insights benutzt — sonst könnte z. B. ein aktiver
+  // "Losses"-Filter fälschlich einen bestandenen Drawdown-Breach verstecken.
+  const accountStats = useMemo(() => {
+    const sorted = [...trades].sort(
+      (a, b) => new Date(a.trade_date) - new Date(b.trade_date) || a.id - b.id
+    );
+
+    const fundedTrades = fundedStage && fundedActivatedAt
+      ? sorted.filter((t) => t.created_at && t.created_at >= fundedActivatedAt)
+      : sorted;
+
+    // In der Funded Stage startet die Balance-/Drawdown-Rechnung ab FUNDED_BALANCE_OVERRIDE
+    // (bekannter realer Kontostand zum Aktivierungszeitpunkt) statt STARTING_BALANCE, damit
+    // vorherige (nicht einzeln erfasste) Funded-Trades die aktuelle Balance nicht verfaelschen.
+    const fundedBase = fundedStage ? FUNDED_BALANCE_OVERRIDE : STARTING_BALANCE;
+
+    const totalPnl = fundedTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
+    const balance = fundedBase + totalPnl;
+
+    let running = fundedBase;
+    let peak = fundedBase;
+    let maxDrawdown = 0;
+    let maxDrawdownPct = 0;
+    const equityCurve = [{ x: 0, y: running }];
+    fundedTrades.forEach((t, i) => {
+      running += Number(t.pnl || 0);
+      equityCurve.push({ x: i + 1, y: running });
+      if (running > peak) peak = running;
+      const dd = peak - running;
+      const ddPct = peak > 0 ? (dd / peak) * 100 : 0;
+      if (dd > maxDrawdown) {
+        maxDrawdown = dd;
+        maxDrawdownPct = ddPct;
+      }
+    });
+
+    const dayMap = new Map();
+    fundedTrades.forEach((t) => {
+      const d = t.trade_date;
+      if (!dayMap.has(d)) dayMap.set(d, { date: d, pnl: 0, count: 0 });
+      const entry = dayMap.get(d);
+      entry.pnl += Number(t.pnl || 0);
+      entry.count += 1;
+    });
+    const tradingDays = Array.from(dayMap.values()).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    // eodPeak startet bewusst bei STARTING_BALANCE (50.000) statt fundedBase: das
+    // reale Konto ist tatsaechlich dort gestartet, der Peak fuer die MLL-Regel bleibt
+    // also unveraendert, auch wenn die aktuelle Balance ueber FUNDED_BALANCE_OVERRIDE
+    // (48.224) weiterlaeuft. eodBalance dagegen startet bei fundedBase, weil das der
+    // bekannte reale Kontostand zum Aktivierungszeitpunkt ist.
+    let eodPeak = STARTING_BALANCE;
+    let eodBalance = fundedBase;
+    tradingDays.forEach((d) => {
+      eodBalance += d.pnl;
+      if (eodBalance > eodPeak) eodPeak = eodBalance;
+    });
+    const cappedPeak = Math.min(eodPeak, DD_PEAK_CAP);
+    const mll = cappedPeak - DD_BUFFER;
+    const ddBufferRemaining = balance - mll;
+    const ddMaxSpan = Math.max(1, eodPeak - mll);
+    const ddRiskPct = Math.max(0, Math.min(100, 100 - (ddBufferRemaining / ddMaxSpan) * 100));
+
+    const distanceToPass = Math.max(0, ACCOUNT_PASS_TARGET - balance);
+    const passProgressPct = Math.max(0, Math.min(100, (balance / ACCOUNT_PASS_TARGET) * 100));
+    const accountPassed = balance >= ACCOUNT_PASS_TARGET;
+
+    return {
+      totalPnl, balance, equityCurve, maxDrawdown, maxDrawdownPct,
+      tradingDays, eodPeak, eodBalance, mll, ddBufferRemaining, ddRiskPct,
+      distanceToPass, passProgressPct, accountPassed,
+    };
+  }, [trades, fundedStage, fundedActivatedAt]);
+
+  // ── Payout-Phase Stats ──
+  // Aktiv sobald "Eval Passed" gesetzt ist. Zählt nur Trading-Tage ab dem
+  // Pass-Datum und prüft die Payout-Regeln: 5 Tage à min. 250$, 50%-Consistency,
+  // eigener DD-Cap (52.100) und Payout-Schwellen (ab 52.600 / 500$).
+  const payoutStats = useMemo(() => {
+    if (!evalPassed) return null;
+
+    const relevantDays = evalPassedDate
+      ? accountStats.tradingDays.filter((d) => d.date >= evalPassedDate)
+      : accountStats.tradingDays;
+
+    // Tage VOR dem aktuellen Funded-Stage-Start (evalPassedDate), die aus der
+    // KOMPLETTEN Trade-Historie (nicht nur den seit der Aktivierung gezaehlten
+    // fundedTrades) berechnet werden. So zaehlen bereits erzielte Winning-Days von
+    // vor dem Neustart automatisch mit — aus echten Trade-Daten, nicht aus einer
+    // manuell eingetragenen Zahl.
+    const preActivationDayMap = new Map();
+    if (evalPassedDate) {
+      trades.forEach((t) => {
+        if (t.trade_date >= evalPassedDate) return;
+        if (!preActivationDayMap.has(t.trade_date)) preActivationDayMap.set(t.trade_date, 0);
+        preActivationDayMap.set(t.trade_date, preActivationDayMap.get(t.trade_date) + Number(t.pnl || 0));
+      });
+    }
+    const preActivationQualifyingDays = Array.from(preActivationDayMap.values())
+      .filter((pnl) => pnl >= PAYOUT_MIN_DAY_PROFIT).length;
+
+    // 5-Tage-Regel: Tage mit min. 250$ Gewinn, müssen nicht aufeinanderfolgen.
+    const qualifyingDays = relevantDays.filter((d) => d.pnl >= PAYOUT_MIN_DAY_PROFIT);
+    const effectiveQualifyingCount = qualifyingDays.length + preActivationQualifyingDays;
+    const daysHit = Math.min(effectiveQualifyingCount, PAYOUT_MIN_DAYS);
+    const daysPassed = effectiveQualifyingCount >= PAYOUT_MIN_DAYS;
+
+    // 50%-Consistency-Regel: kein einzelner Tag darf mehr als 50% des
+    // gesamten Nettogewinns seit Eval-Passed ausmachen
+    const netProfitSincePass = relevantDays.reduce((s, d) => s + d.pnl, 0);
+    const biggestDay = relevantDays.length ? Math.max(...relevantDays.map((d) => d.pnl)) : 0;
+    const consistencyPct = netProfitSincePass > 0 ? (biggestDay / netProfitSincePass) * 100 : 0;
+    const consistencyPassed = netProfitSincePass <= 0 || consistencyPct <= PAYOUT_CONSISTENCY_PCT;
+
+    // Payout-eigener Drawdown-Cap: identische Logik wie die Eval-MLL, aber
+    // der Cap-Peak endet bereits bei 52.100 statt 52.000. eodPeak startet bei
+    // STARTING_BALANCE (realer Kontostart), eodBalance bei FUNDED_BALANCE_OVERRIDE
+    // (bekannter realer Stand zum Aktivierungszeitpunkt) — siehe accountStats.
+    let eodPeak = STARTING_BALANCE;
+    let eodBalance = FUNDED_BALANCE_OVERRIDE;
+    accountStats.tradingDays.forEach((d) => {
+      eodBalance += d.pnl;
+      if (eodBalance > eodPeak) eodPeak = eodBalance;
+    });
+    const cappedPeak = Math.min(eodPeak, PAYOUT_DD_PEAK_CAP);
+    const mll = cappedPeak - DD_BUFFER;
+    const balance = accountStats.balance;
+    const ddBufferRemaining = balance - mll;
+    const ddMaxSpan = Math.max(1, eodPeak - mll);
+    const ddRiskPct = Math.max(0, Math.min(100, 100 - (ddBufferRemaining / ddMaxSpan) * 100));
+
+    const allRulesPassed = daysPassed && consistencyPassed;
+
+    return {
+      relevantDays, qualifyingDays, effectiveQualifyingCount, daysHit, daysPassed,
+      netProfitSincePass, biggestDay, consistencyPct, consistencyPassed,
+      eodPeak, mll, ddBufferRemaining, ddRiskPct,
+      allRulesPassed,
+    };
+  }, [evalPassed, evalPassedDate, accountStats.tradingDays, accountStats.balance, trades]);
+
+  const calendar = useMemo(() => {
+    const { year, month } = cursor;
+    const byDay = new Map();
+    filteredTrades.forEach((t) => {
+      const d = t.trade_date;
+      const [ty, tm] = d.split("-").map(Number);
+      if (ty === year && tm - 1 === month) {
+        if (!byDay.has(d)) byDay.set(d, []);
+        byDay.get(d).push(t);
+      }
+    });
+
+    const nDays = daysInMonth(year, month);
+    const firstOffset = mondayIndex(startOfMonth(year, month));
+    const cells = [];
+    for (let i = 0; i < firstOffset; i++) cells.push(null);
+    for (let day = 1; day <= nDays; day++) {
+      const iso = isoDate(year, month, day);
+      const dayTrades = byDay.get(iso) || [];
+      // In funded stage: Eval-Trades (created_at vor Aktivierung) sind "historic"
+      const isHistoric = fundedStage && fundedActivatedAt && iso < (fundedStartDate || "9999");
+      // Ein Tag gilt als historic wenn ALLE seine Trades historic sind
+      const allHistoric = isHistoric && dayTrades.every((t) => !t.created_at || t.created_at < fundedActivatedAt);
+      const activeTrades = fundedStage && fundedActivatedAt
+        ? dayTrades.filter((t) => t.created_at && t.created_at >= fundedActivatedAt)
+        : dayTrades;
+      const hasHistoricTrades = fundedStage && fundedActivatedAt
+        ? dayTrades.some((t) => !t.created_at || t.created_at < fundedActivatedAt)
+        : false;
+      const pnl = activeTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
+      const rawPnl = dayTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
+      cells.push({ day, iso, trades: dayTrades, pnl, rawPnl, isHistoric: allHistoric && activeTrades.length === 0, hasHistoricTrades });
+    }
+    while (cells.length % 7 !== 0) cells.push(null);
+
+    const weeks = [];
+    for (let i = 0; i < cells.length; i += 7) {
+      const weekCells = cells.slice(i, i + 7);
+      const realDates = weekCells.filter(Boolean);
+      const weekPnl = realDates.reduce((s, c) => s + c.pnl, 0);
+      const weekTradeCount = realDates.reduce((s, c) => s + c.trades.length, 0);
+      const weekNum = realDates.length
+        ? isoWeek(new Date(year, month, realDates[0].day))
+        : null;
+      weeks.push({ cells: weekCells, weekPnl, weekTradeCount, weekNum });
+    }
+
+    const monthTotal = Array.from(byDay.values())
+      .flat()
+      .filter((t) => !fundedStage || !fundedActivatedAt || (t.created_at && t.created_at >= fundedActivatedAt))
+      .reduce((s, t) => s + Number(t.pnl || 0), 0);
+    const monthTradeCount = Array.from(byDay.values()).flat().length;
+
+    return { weeks, monthTotal, monthTradeCount };
+  }, [filteredTrades, cursor, fundedStage, fundedActivatedAt, fundedStartDate]);
+
+  // Postet einen Trade zu Supabase; fällt automatisch auf ein Payload ohne
+  // "realized_rr" zurück, falls diese Spalte in der Tabelle noch nicht existiert
+  // (z. B. bei einer Datenbank, die vor diesem Feature angelegt wurde).
+  const postTradeWithFallback = async (trade) => {
+    let payload = trade;
+    let res = await fetch(REST_URL, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
+    if (!res.ok) {
+      let body = await res.text();
+      if (/realized_rr/i.test(body) && payload.realized_rr !== undefined) {
+        const { realized_rr, ...rest } = payload;
+        payload = rest;
+        res = await fetch(REST_URL, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
+        if (!res.ok) body = await res.text();
+      }
+      if (!res.ok && /setup/i.test(body) && payload.setup !== undefined) {
+        const { setup, ...rest } = payload;
+        payload = rest;
+        res = await fetch(REST_URL, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
+        if (!res.ok) body = await res.text();
+      }
+      if (!res.ok && /confluences/i.test(body) && payload.confluences !== undefined) {
+        const { confluences, ...rest } = payload;
+        payload = rest;
+        res = await fetch(REST_URL, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
+        if (!res.ok) body = await res.text();
+      }
+      if (!res.ok) throw new Error(`Speichern fehlgeschlagen (${res.status}): ${body}`);
+    }
+    return res;
+  };
+
+  const handleAddTrade = useCallback(
+    async (trade) => {
+      setSaving(true);
+      setError(null);
+      try {
+        if (!isConfigured) {
+          setTrades((prev) => [
+            ...prev,
+            { ...trade, id: Math.max(0, ...prev.map((t) => t.id || 0)) + 1, created_at: new Date().toISOString() },
+          ]);
+          setPanelOpen(false);
+          pushToast("Trade gespeichert (Demo-Modus)");
+          return;
+        }
+        const res = await postTradeWithFallback(trade);
+        if (!res.ok) {
+          const body = await res.text();
+          throw new Error(`Speichern fehlgeschlagen (${res.status}): ${body}`);
+        }
+        const inserted = await res.json();
+        setTrades((prev) => [...prev, ...inserted]);
+        setPanelOpen(false);
+        pushToast("Trade gespeichert");
+      } catch (e) {
+        setError(e.message || "Trade konnte nicht gespeichert werden");
+        pushToast(e.message || "Trade konnte nicht gespeichert werden", "error");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [pushToast]
+  );
+
+  const handleUpdateTrade = useCallback(
+    async (id, patch) => {
+      setSaving(true);
+      setError(null);
+      try {
+        if (!isConfigured) {
+          setTrades((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+          setEditingTrade(null);
+          pushToast("Trade aktualisiert (Demo-Modus)");
+          return;
+        }
+        let patchPayload = patch;
+        let res = await fetch(`${REST_URL}?id=eq.${id}`, {
+          method: "PATCH",
+          headers: sbHeaders,
+          body: JSON.stringify(patchPayload),
+        });
+        if (!res.ok) {
+          let body = await res.text();
+          if (/realized_rr/i.test(body) && patchPayload.realized_rr !== undefined) {
+            const { realized_rr, ...rest } = patchPayload;
+            patchPayload = rest;
+            res = await fetch(`${REST_URL}?id=eq.${id}`, {
+              method: "PATCH",
+              headers: sbHeaders,
+              body: JSON.stringify(patchPayload),
+            });
+            if (!res.ok) body = await res.text();
+          }
+          if (!res.ok && /setup/i.test(body) && patchPayload.setup !== undefined) {
+            const { setup, ...rest } = patchPayload;
+            patchPayload = rest;
+            res = await fetch(`${REST_URL}?id=eq.${id}`, {
+              method: "PATCH",
+              headers: sbHeaders,
+              body: JSON.stringify(patchPayload),
+            });
+            if (!res.ok) body = await res.text();
+          }
+          if (!res.ok && /confluences/i.test(body) && patchPayload.confluences !== undefined) {
+            const { confluences, ...rest } = patchPayload;
+            patchPayload = rest;
+            res = await fetch(`${REST_URL}?id=eq.${id}`, {
+              method: "PATCH",
+              headers: sbHeaders,
+              body: JSON.stringify(patchPayload),
+            });
+            if (!res.ok) body = await res.text();
+          }
+          if (!res.ok) throw new Error(`Aktualisieren fehlgeschlagen (${res.status}): ${body}`);
+        }
+        const updated = await res.json();
+        setTrades((prev) => prev.map((t) => (t.id === id ? { ...t, ...updated[0] } : t)));
+        setEditingTrade(null);
+        pushToast("Trade aktualisiert");
+      } catch (e) {
+        setError(e.message || "Trade konnte nicht aktualisiert werden");
+        pushToast(e.message || "Trade konnte nicht aktualisiert werden", "error");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [pushToast]
+  );
+
+  const handleDeleteTrade = useCallback(
+    async (tradeId) => {
+      setError(null);
+      try {
+        if (!isConfigured) {
+          setTrades((prev) => prev.filter((t) => t.id !== tradeId));
+          pushToast("Trade gelöscht (Demo-Modus)");
+          return;
+        }
+        const res = await fetch(`${REST_URL}?id=eq.${tradeId}`, {
+          method: "DELETE",
+          headers: sbHeaders,
+        });
+        if (!res.ok) {
+          const body = await res.text();
+          throw new Error(`Löschen fehlgeschlagen (${res.status}): ${body}`);
+        }
+        setTrades((prev) => prev.filter((t) => t.id !== tradeId));
+        pushToast("Trade gelöscht");
+      } catch (e) {
+        setError(e.message || "Trade konnte nicht gelöscht werden");
+        pushToast(e.message || "Trade konnte nicht gelöscht werden", "error");
+      }
+    },
+    [pushToast]
+  );
+
+  const today = new Date();
+  const isCurrentMonthNow = cursor.year === today.getFullYear() && cursor.month === today.getMonth();
+
+  useEffect(() => {
+    if (dayDetailData && dayDetailData.trades.length === 0) {
+      setDayDetail(null);
+    }
+  }, [dayDetailData]);
+
+  // ── Tastatur-Shortcuts: N = neuer Trade, Esc = Modal schließen ──
+  useEffect(() => {
+    const handler = (e) => {
+      const tag = (e.target.tagName || "").toLowerCase();
+      const typing = tag === "input" || tag === "textarea" || e.target.isContentEditable;
+
+      if (e.key === "Escape") {
+        if (panelOpen) setPanelOpen(false);
+        else if (editingTrade) setEditingTrade(null);
+        else if (dayDetail) setDayDetail(null);
+        return;
+      }
+      if (typing) return;
+      if ((e.key === "n" || e.key === "N") && !panelOpen && !editingTrade && !dayDetail) {
+        e.preventDefault();
+        setPanelOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [panelOpen, editingTrade, dayDetail]);
+
+  return (
+    <div className="journal-shell">
+      <header className="topbar">
+        <div className="brand">
+            <img src="sharingan.png" alt="Logo" style={{ width: "220px", height: "100px", borderRadius: "10px" }} />
+        </div>
+        <div className="topbar-actions">
+          {!fundedStage && accountStats.accountPassed && (
+            <button
+              className="btn-secondary active"
+              onClick={() => {
+                if (window.confirm("Eval bestanden — Funded Stage starten? Der Account wird auf $50.000 zurueckgesetzt. Deine bisherigen Trades bleiben im Kalender sichtbar.")) {
+                  activateFundedStage();
+                }
+              }}
+              title="Account auf 50k zuruecksetzen und Funded Stage beginnen"
+            >
+              Eval Passed ✓
+            </button>
+          )}
+          <button className="btn-secondary" onClick={() => setForwardTestOpen(true)}>
+            Forward Test
+          </button>
+          <button className="btn-primary" onClick={() => setPanelOpen(true)}>
+            <Icon.Plus /> Trade hinzufuegen <span className="kbd-hint">N</span>
+          </button>
+        </div>
+      </header>
+
+      {!isConfigured && (
+        <div className="notice">
+          Supabase ist noch nicht verbunden — trage SUPABASE_URL und SUPABASE_ANON_KEY oben im Script-Tag ein. Bis dahin läuft das Dashboard im lokalen Demo-Modus (Daten gehen beim Neuladen verloren).
+        </div>
+      )}
+      {error && <div className="notice notice-error">{error}</div>}
+
+      <section className="hero">
+        <div className="hero-balance">
+          <span className="hero-label">Account Balance</span>
+          <span className="hero-value">{fmtMoney(accountStats.balance)}</span>
+          <span className={`hero-delta ${accountStats.totalPnl >= 0 ? "pos" : "neg"}`}>
+            {accountStats.totalPnl >= 0 ? <Icon.Up /> : <Icon.Down />}
+            {fmtMoneyShort(accountStats.totalPnl)} gesamt
+          </span>
+        </div>
+        <div className="hero-curve">
+          <EquityCurve data={accountStats.equityCurve} />
+        </div>
+      </section>
+
+      {fundedStage && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "4px" }}>
+          <button
+            className="payout-banner-clear"
+            style={{ fontSize: "11px", padding: "3px 8px" }}
+            onClick={() => {
+              if (window.confirm("Wirklich zurueck zur Eval Stage? Die Funded-Stage-Balance/Payout-Tracking wird pausiert, bis du sie wieder aktivierst.")) {
+                resetToEvalStage();
+              }
+            }}
+          >
+            Zurueck zur Eval Stage
+          </button>
+        </div>
+      )}
+
+      {!fundedStage && fundedStartDate && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "4px" }}>
+          <button
+            className="payout-banner-clear"
+            style={{ fontSize: "11px", padding: "3px 8px" }}
+            onClick={reactivateFundedStage}
+            title={`Funded Stage war aktiv seit ${fundedStartDate} — ohne neuen Trade wiederherstellen`}
+          >
+            Zurueck zur Funded Stage
+          </button>
+        </div>
+      )}
+
+      {!fundedStage && !fundedStartDate && (
+        <FundedStageRecovery onRestore={restoreFundedStage} />
+      )}
+
+      {!evalPassed ? (
+        <div className="risk-row">
+          <div className="risk-card">
+            <div className="risk-head">
+              <span className="risk-label">Drawdown (EOD, Trailing)</span>
+              <span className={`risk-value ${accountStats.ddBufferRemaining < DD_BUFFER ? "warn" : "pos"}`}>
+                {fmtMoneyShort(-Math.max(0, accountStats.eodPeak - accountStats.balance))}
+              </span>
+            </div>
+            <div className="risk-track">
+              <div className="risk-fill dd" style={{ width: `${accountStats.ddRiskPct}%` }} />
+            </div>
+            <div className="risk-meta">
+              <span>MLL: {fmtMoney(accountStats.mll)} (fix ab 52k Peak)</span>
+              <span>Puffer zur MLL: {fmtMoneyShort(accountStats.ddBufferRemaining)}</span>
+            </div>
+          </div>
+          <div className="risk-card" style={{ gridColumn: "1 / -1" }}>
+            <div className="risk-head">
+              <span className="risk-label">Fortschritt zur Funded Stage</span>
+              <span className={`risk-value ${accountStats.accountPassed ? "pos" : ""}`}>
+                {accountStats.accountPassed ? "Passed ✓" : fmtMoneyShort(-(ACCOUNT_PASS_TARGET - accountStats.balance))}
+              </span>
+            </div>
+            {(() => {
+              // Skala: von MLL (links) bis 53k (rechts)
+              // MLL ist dynamisch (trailing), gecappt bei 50k wenn Peak >= 52k
+              const scaleLeft = accountStats.mll;   // z.B. 49500 am Anfang, dann steigend, max 50000
+              const scaleRight = ACCOUNT_PASS_TARGET; // 53000
+              const scaleRange = scaleRight - scaleLeft;
+              // Wie weit hat die Balance den Range gefuellt?
+              const fillPct = Math.max(0, Math.min(100, ((accountStats.balance - scaleLeft) / scaleRange) * 100));
+              // Wo liegt 50k auf der Skala?
+              const startMarkerPct = Math.max(0, Math.min(100, ((STARTING_BALANCE - scaleLeft) / scaleRange) * 100));
+              const passed = accountStats.accountPassed;
+              // Farbe: rot wenn unter 50k, weiss wenn normal, gruen wenn passed
+              const fillColor = accountStats.balance < STARTING_BALANCE ? "var(--red)" : passed ? "#2ecc71" : "var(--text)";
+              return (
+                <div style={{ position: "relative", marginTop: "6px" }}>
+                  {/* Track */}
+                  <div style={{ position: "relative", height: "10px", background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "5px", overflow: "visible" }}>
+                    {/* Rote DD-Zone links von 50k */}
+                    <div style={{
+                      position: "absolute", left: 0, top: 0, bottom: 0,
+                      width: `${startMarkerPct}%`,
+                      background: "rgba(224,0,26,0.15)",
+                      borderRight: "1px solid rgba(224,0,26,0.4)",
+                      borderRadius: "5px 0 0 5px",
+                    }} />
+                    {/* Fuellstand */}
+                    <div style={{
+                      position: "absolute", left: 0, top: 0, bottom: 0,
+                      width: `${fillPct}%`,
+                      background: fillColor,
+                      borderRadius: "5px",
+                      transition: "width .3s ease",
+                      opacity: 0.9,
+                    }} />
+                    {/* 50k Marker-Linie */}
+                    <div style={{
+                      position: "absolute", left: `${startMarkerPct}%`, top: "-3px", bottom: "-3px",
+                      width: "2px", background: "rgba(255,255,255,0.4)", borderRadius: "1px",
+                    }} />
+                  </div>
+                  {/* Labels */}
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: "7px", fontSize: "11px" }}>
+                    <span style={{ color: "rgba(224,0,26,0.8)" }}>{fmtMoney(scaleLeft)}</span>
+                    <span style={{ color: "var(--muted-light)" }}>{fmtMoney(STARTING_BALANCE)}</span>
+                    <span style={{ color: passed ? "#2ecc71" : "var(--muted-light)" }}>{fmtMoney(ACCOUNT_PASS_TARGET)} ✓</span>
+                  </div>
+                </div>
+              );
+            })()}
+            <div className="risk-meta" style={{ marginTop: "2px" }}>
+              <span>MLL: {fmtMoney(accountStats.mll)} · Balance: {fmtMoney(accountStats.balance)}</span>
+              <span>{accountStats.accountPassed ? "Ziel erreicht" : `Noch ${fmtMoneyShort(-(ACCOUNT_PASS_TARGET - accountStats.balance))} bis 53k`}</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="payout-grid">
+          <div className="payout-card">
+            <div className="payout-card-title">
+              <span className={`payout-status-dot ${payoutStats.daysPassed ? "ok" : ""}`} />
+              5 Trading-Tage à 250$+
+            </div>
+            <span className="payout-main">{payoutStats.daysHit} / {PAYOUT_MIN_DAYS}</span>
+            <div className="payout-days">
+              {Array.from({ length: PAYOUT_MIN_DAYS }).map((_, i) => (
+                <span key={i} className={`payout-day-pip ${i < payoutStats.daysHit ? "hit" : ""}`}>
+                  {i < payoutStats.daysHit ? "✓" : ""}
+                </span>
+              ))}
+            </div>
+            <span className="payout-sub">Müssen nicht aufeinanderfolgen — {payoutStats.effectiveQualifyingCount} Tag{payoutStats.effectiveQualifyingCount === 1 ? "" : "e"} bisher qualifiziert.</span>
+          </div>
+
+          <div className="payout-card">
+            <div className="payout-card-title">
+              <span className={`payout-status-dot ${payoutStats.consistencyPassed ? "ok" : "fail"}`} />
+              50% Consistency Rule
+            </div>
+            <span className="payout-main">{payoutStats.consistencyPct.toFixed(1)}%</span>
+            <span className="payout-sub">
+              {payoutStats.consistencyPassed
+                ? "Bester Tag bleibt unter 50% des Gesamtgewinns."
+                : "Achtung: ein Tag dominiert über 50% des Gesamtgewinns seit Pass."}
+              {" "}Größter Tag: {fmtMoneyShort(payoutStats.biggestDay)}
+            </span>
+          </div>
+
+          <div className="payout-card">
+            <div className="payout-card-title">
+              <span className="payout-status-dot ok" />
+              Drawdown (Payout-Cap 52.100)
+            </div>
+            <span className="payout-main">{fmtMoneyShort(-Math.max(0, payoutStats.eodPeak - accountStats.balance))}</span>
+            <div className="risk-track">
+              <div className="risk-fill dd" style={{ width: `${payoutStats.ddRiskPct}%` }} />
+            </div>
+            <span className="payout-sub">MLL: {fmtMoney(payoutStats.mll)} · Puffer: {fmtMoneyShort(payoutStats.ddBufferRemaining)}</span>
+          </div>
+        </div>
+      )}
+
+      <section className="stat-row">
+        <StatCard label="Profit Factor" value={Number.isFinite(stats.profitFactor) ? stats.profitFactor.toFixed(2) : "∞"} />
+        <StatCard label={`Winrate (excl. BE)`} value={`${stats.winrate.toFixed(1)}%`} />
+        <StatCard label="Avg. RR" value={stats.avgRR ? stats.avgRR.toFixed(2) : "—"} />
+        <StatCard label="Expectancy / Trade" value={stats.decidedTrades.length ? fmtMoneyShort(stats.expectancy) : "—"} />
+        <StatCard label="Trades gesamt" value={stats.count} />
+      </section>
+
+      <div className="filter-bar">
+        <div className="filter-group">
+          <button
+            className={`filter-chip ${filterSymbol === "all" ? "active" : ""}`}
+            onClick={() => setFilterSymbol("all")}
+          >
+            Alle Symbole
+          </button>
+          {Object.keys(SYMBOLS).map((key) => (
+            <button
+              key={key}
+              className={`filter-chip ${filterSymbol === key ? "active" : ""}`}
+              onClick={() => setFilterSymbol(key)}
+            >
+              {key}
+            </button>
+          ))}
+        </div>
+        <div className="filter-group">
+          <button
+            className={`filter-chip ${filterResult === "all" ? "active" : ""}`}
+            onClick={() => setFilterResult("all")}
+          >
+            Alle
+          </button>
+          <button
+            className={`filter-chip win-chip ${filterResult === "win" ? "active" : ""}`}
+            onClick={() => setFilterResult("win")}
+          >
+            Wins
+          </button>
+          <button
+            className={`filter-chip be-chip ${filterResult === "be" ? "active" : ""}`}
+            onClick={() => setFilterResult("be")}
+          >
+            BE
+          </button>
+          <button
+            className={`filter-chip loss-chip ${filterResult === "loss" ? "active" : ""}`}
+            onClick={() => setFilterResult("loss")}
+          >
+            Losses
+          </button>
+        </div>
+        {hasActiveFilters && (
+          <button className="filter-clear" onClick={() => { setFilterSymbol("all"); setFilterResult("all"); }}>
+            Filter zurücksetzen
+          </button>
+        )}
+        <div className="filter-spacer" />
+        {hasActiveFilters && (
+          <span className="filter-count">{filteredTrades.length} von {trades.length} Trades</span>
+        )}
+      </div>
+
+      <section className="insights-card">
+        <div className="insights-title">Insights</div>
+        <div className="insights-grid">
+          <div className="insight-item">
+            <span className="insight-label">Max Drawdown</span>
+            <span className="insight-value neg">{stats.maxDrawdown ? fmtMoneyShort(-stats.maxDrawdown) : "—"}</span>
+            <span className="insight-sub">{stats.maxDrawdown ? `${stats.maxDrawdownPct.toFixed(1)}% vom Peak` : "Kein Rückgang"}</span>
+          </div>
+          <div className="insight-item">
+            <span className="insight-label">Aktuelle Streak</span>
+            <span className={`insight-value ${stats.currentStreakType === "loss" ? "neg" : "pos"}`}>
+              {stats.currentStreak ? `${stats.currentStreak}×` : "—"}
+            </span>
+            <span className="insight-sub">
+              {stats.currentStreakType === "win" ? "Wins in Folge" : stats.currentStreakType === "loss" ? "Losses in Folge" : "Noch keine Trades"}
+            </span>
+          </div>
+          <div className="insight-item">
+            <span className="insight-label">Bester Trade</span>
+            <span className="insight-value pos">{stats.bestTrade ? fmtMoneyShort(Number(stats.bestTrade.pnl)) : "—"}</span>
+            <span className="insight-sub">{stats.bestTrade ? `${stats.bestTrade.symbol} · ${stats.bestTrade.trade_date}` : "—"}</span>
+          </div>
+          <div className="insight-item">
+            <span className="insight-label">Schlechtester Trade</span>
+            <span className="insight-value neg">{stats.worstTrade ? fmtMoneyShort(Number(stats.worstTrade.pnl)) : "—"}</span>
+            <span className="insight-sub">{stats.worstTrade ? `${stats.worstTrade.symbol} · ${stats.worstTrade.trade_date}` : "—"}</span>
+          </div>
+        </div>
+
+        <div className="insights-cols" style={{ gridTemplateColumns: "1fr" }}>
+          <div>
+            <div className="insights-col-title">Nach Wochentag</div>
+            {stats.byWeekday.filter((d) => d.count > 0).length === 0 && <span className="insight-sub">Keine Daten</span>}
+            {stats.byWeekday.map((d) => d.count > 0 && (
+              <div className="breakdown-row" key={d.label}>
+                <span className="breakdown-label">{d.label.slice(0, 2)}</span>
+                <div className="breakdown-bar-track">
+                  <div
+                    className={`breakdown-bar-fill ${d.pnl < 0 ? "neg" : ""}`}
+                    style={{ width: `${Math.min(100, (Math.abs(d.pnl) / stats.maxAbsWeekdayPnl) * 100)}%` }}
+                  />
+                </div>
+                <span className={`breakdown-value ${d.pnl >= 0 ? "pos" : "neg"}`}>{fmtMoneyShort(d.pnl)}</span>
+                <span className="breakdown-count">{d.count}x</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="insights-card">
+        <div className="insights-title">Confluence-Analyse</div>
+        {confluenceStats.length === 0 ? (
+          <span className="insight-sub">Noch keine Trades mit Confluences erfasst. Füge beim nächsten Trade Confluences hinzu, um hier Statistiken zu sehen.</span>
+        ) : (
+          <div className="trade-list">
+            {confluenceStats.map((c) => (
+              <div className="breakdown-row" key={c.tag} style={{ gap: "12px" }}>
+                <span className="breakdown-label" style={{ width: "140px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={c.tag}>{c.tag}</span>
+                <div className="breakdown-bar-track">
+                  <div
+                    className={`breakdown-bar-fill ${c.winrate < 50 ? "neg" : ""}`}
+                    style={{ width: `${Math.min(100, (c.count / maxConfluenceCount) * 100)}%` }}
+                  />
+                </div>
+                <span className={`breakdown-value ${c.winrate >= 50 ? "pos" : "neg"}`} style={{ width: "64px" }}>{c.winrate.toFixed(0)}% WR</span>
+                <span className="breakdown-value" style={{ width: "76px" }}>{c.avgRR ? `${c.avgRR.toFixed(2)}R` : "—"}</span>
+                <span className="breakdown-value" style={{ width: "88px" }}>{c.avgPoints ? `${c.avgPoints >= 0 ? "+" : ""}${c.avgPoints.toFixed(1)} Pkt` : "—"}</span>
+                <span className="breakdown-count">{c.count}x</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="insights-card">
+        <div className="insights-title">Top Confluence-Kombinationen (ab {MIN_COMBO_SAMPLE} Trades)</div>
+        {comboStats.length === 0 ? (
+          <span className="insight-sub">Noch nicht genug Trades mit mehreren gemeinsamen Confluences, um Kombinationen zu ranken (mind. {MIN_COMBO_SAMPLE} Trades je Kombination nötig).</span>
+        ) : (
+          <div className="trade-list">
+            {comboStats.map((c) => (
+              <div className="breakdown-row" key={c.key} style={{ gap: "12px" }}>
+                <span className="breakdown-label" style={{ width: "220px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={c.key}>{c.key}</span>
+                <span className={`breakdown-value ${c.winrate >= 50 ? "pos" : "neg"}`} style={{ width: "64px" }}>{c.winrate.toFixed(0)}% WR</span>
+                <span className="breakdown-value" style={{ width: "76px" }}>{c.avgRR ? `${c.avgRR.toFixed(2)}R` : "—"}</span>
+                <span className="breakdown-count">{c.count}x</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <span style={{ fontSize: "11px", color: "var(--muted-light)", marginTop: "6px", display: "block" }}>
+          Basiert auf der kompletten Trade-Historie (nicht vom Filter oben betroffen), sortiert nach Winrate.
+        </span>
+      </section>
+
+      <section className="cal-card">
+        <div className="cal-head">
+          <div className="cal-title">
+            <span>{MONTHS[cursor.month]}</span>
+            <span className="cal-year">{cursor.year}</span>
+          </div>
+          <div className="cal-nav">
+            <span className={`cal-month-pnl ${calendar.monthTotal >= 0 ? "pos" : "neg"}`}>
+              {fmtMoneyShort(calendar.monthTotal)} · {calendar.monthTradeCount} Trades
+            </span>
+            <button
+              className="cal-navbtn"
+              onClick={() =>
+                setCursor((c) => {
+                  const m = c.month === 0 ? 11 : c.month - 1;
+                  const y = c.month === 0 ? c.year - 1 : c.year;
+                  return { year: y, month: m };
+                })
+              }
+              aria-label="Vorheriger Monat"
+            >
+              <Icon.ChevL />
+            </button>
+            <button
+              className="cal-navbtn"
+              onClick={() =>
+                setCursor((c) => {
+                  const m = c.month === 11 ? 0 : c.month + 1;
+                  const y = c.month === 11 ? c.year + 1 : c.year;
+                  return { year: y, month: m };
+                })
+              }
+              aria-label="Nächster Monat"
+            >
+              <Icon.ChevR />
+            </button>
+          </div>
+        </div>
+
+        <div className="cal-grid-header">
+          {WEEKDAYS.map((d) => (
+            <div key={d} className="cal-dow">{d}</div>
+          ))}
+          <div className="cal-dow cal-dow-week">Woche</div>
+        </div>
+
+        {loading ? (
+          <div className="cal-loading">Lade Trades…</div>
+        ) : (
+          calendar.weeks.map((week, wi) => (
+            <div className="cal-week" key={wi}>
+              {week.cells.map((cell, ci) => {
+                if (!cell) return <div className="cal-cell cal-cell-empty" key={ci} />;
+                const isToday = isCurrentMonthNow && cell.day === today.getDate();
+                const hasTrades = cell.trades.length > 0;
+                const displayPnl = cell.isHistoric ? cell.rawPnl : cell.pnl;
+                return (
+                  <button
+                    key={ci}
+                    className={`cal-cell ${hasTrades ? (displayPnl >= 0 ? "cal-win" : "cal-loss") : ""} ${isToday ? "cal-today" : ""} ${cell.isHistoric ? "cal-cell-historic" : ""}`}
+                    onClick={() => hasTrades && setDayDetail(cell.iso)}
+                    disabled={!hasTrades}
+                  >
+                    <span className="cal-daynum">{cell.day}</span>
+                    {hasTrades && (
+                      <React.Fragment>
+                        <span className="cal-pnl">{fmtMoneyShort(displayPnl)}</span>
+                        <span className="cal-count">{cell.trades.length} Trade{cell.trades.length > 1 ? "s" : ""}</span>
+                        {cell.isHistoric && <span className="cal-historic-badge">Eval</span>}
+                      </React.Fragment>
+                    )}
+                  </button>
+                );
+              })}
+              <div className="cal-cell cal-weeksum">
+                <span className="cal-weeknum">KW {week.weekNum ?? "—"}</span>
+                <span className={`cal-weekpnl ${week.weekPnl >= 0 ? "pos" : "neg"}`}>
+                  {week.weekTradeCount ? fmtMoneyShort(week.weekPnl) : "—"}
+                </span>
+                {week.weekTradeCount > 0 && (
+                  <span className="cal-weekcount">{week.weekTradeCount} Trade{week.weekTradeCount > 1 ? "s" : ""}</span>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </section>
+
+      {panelOpen && (
+        <AddTradePanel
+          onClose={() => setPanelOpen(false)}
+          onSubmit={handleAddTrade}
+          saving={saving}
+          existingSetups={existingSetups}
+          existingConfluences={confluenceOptions}
+        />
+      )}
+
+      {editingTrade && (
+        <AddTradePanel
+          onClose={() => setEditingTrade(null)}
+          onSubmit={(patch) => handleUpdateTrade(editingTrade.id, patch)}
+          saving={saving}
+          initialTrade={editingTrade}
+          isEdit
+          existingSetups={existingSetups}
+          existingConfluences={confluenceOptions}
+        />
+      )}
+
+      {forwardTestOpen && (
+        <ForwardTestPanel
+          onClose={() => setForwardTestOpen(false)}
+          trades={trades}
+          existingConfluences={confluenceOptions}
+          realizedRRForTrade={realizedRRForTrade}
+          realizedPointsForTrade={realizedPointsForTrade}
+        />
+      )}
+
+      {dayDetailData && dayDetailData.trades.length > 0 && (
+        <DayDetailModal
+          day={dayDetailData}
+          onClose={() => setDayDetail(null)}
+          onDelete={handleDeleteTrade}
+          onEdit={(trade) => { setDayDetail(null); setEditingTrade(trade); }}
+        />
+      )}
+
+      <div className="toast-stack">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.type === "error" ? "toast-error" : ""}`}>{t.message}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value }) {
+  return (
+    <div className="stat-card">
+      <span className="stat-label">{label}</span>
+      <span className="stat-value">{value}</span>
+    </div>
+  );
+}
+
+// Einmalige manuelle Wiederherstellung, falls Start-/Aktivierungsdatum der Funded
+// Stage bereits verloren gegangen sind (z. B. durch eine alte Version des
+// "Zurueck zur Eval Stage"-Buttons). Erscheint nur solange kein fundedStartDate
+// gespeichert ist — danach reicht der normale "Zurueck zur Funded Stage"-Button.
+function FundedStageRecovery({ onRestore }) {
+  const [value, setValue] = useState("");
+  return (
+    <div className="notice" style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+      <span>
+        Warst du schon in der Funded Stage und bist versehentlich zurueckgesprungen? Trag den
+        urspruenglichen Aktivierungs-Zeitpunkt ein, um sie ohne einen neuen Trade wiederherzustellen.
+      </span>
+      <input
+        type="datetime-local"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        style={{
+          background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "4px",
+          padding: "8px 10px", color: "var(--text)", fontSize: "13px", fontFamily: "'JetBrains Mono', monospace",
+        }}
+      />
+      <button
+        type="button"
+        className="payout-banner-clear"
+        style={{ fontSize: "11px", padding: "6px 12px" }}
+        disabled={!value}
+        onClick={() => onRestore(value)}
+      >
+        Wiederherstellen
+      </button>
+    </div>
+  );
+}
+
+function EquityCurve({ data }) {
+  const w = 560;
+  const h = 120;
+  const pad = 6;
+
+  if (data.length < 2) {
+    return (
+      <svg viewBox={`0 0 ${w} ${h}`} className="equity-svg">
+        <line x1={pad} y1={h / 2} x2={w - pad} y2={h / 2} stroke="var(--line)" strokeWidth="1.5" strokeDasharray="4 6" />
+      </svg>
+    );
+  }
+
+  const ys = data.map((d) => d.y);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const range = maxY - minY || 1;
+
+  const points = data.map((d, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((d.y - minY) / range) * (h - pad * 2);
+    return [x, y];
+  });
+
+  const lineD = points.map((p, i) => (i === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`)).join(" ");
+  const areaD = `${lineD} L${points[points.length - 1][0]},${h - pad} L${points[0][0]},${h - pad} Z`;
+
+  const last = data[data.length - 1].y;
+  const first = data[0].y;
+  const positive = last >= first;
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="equity-svg" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={positive ? "var(--green)" : "var(--red)"} stopOpacity="0.22" />
+          <stop offset="100%" stopColor={positive ? "var(--green)" : "var(--red)"} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={areaD} fill="url(#eqFill)" />
+      <path d={lineD} fill="none" stroke={positive ? "var(--green)" : "var(--red)"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={points[points.length - 1][0]} cy={points[points.length - 1][1]} r="3.5" fill={positive ? "var(--green)" : "var(--red)"} />
+    </svg>
+  );
+}
+
+function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit = false, existingSetups = [], existingConfluences = [] }) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = useState(() => {
+    if (initialTrade) {
+      return {
+        trade_date: initialTrade.trade_date,
+        symbol: initialTrade.symbol,
+        contracts: String(initialTrade.contracts),
+        direction: initialTrade.direction,
+        result: initialTrade.result,
+        stop_loss: String(initialTrade.stop_loss ?? ""),
+        take_profit: String(initialTrade.take_profit ?? ""),
+        manual_pnl: initialTrade.pnl !== null && initialTrade.pnl !== undefined ? String(initialTrade.pnl) : "",
+        note: initialTrade.note || "",
+        screenshot: initialTrade.screenshot || "",
+        setup: initialTrade.setup || "",
+        confluences: Array.isArray(initialTrade.confluences) ? initialTrade.confluences : [],
+      };
+    }
+    return {
+      trade_date: todayIso,
+      symbol: "NQ",
+      contracts: String(SYMBOLS.NQ.defaultContracts),
+      direction: "long",
+      result: "win",
+      stop_loss: "10",
+      take_profit: "",
+      manual_pnl: "",
+      note: "",
+      screenshot: "",
+      setup: "",
+      confluences: [],
+    };
+  });
+  const [touched, setTouched] = useState(false);
+  const [newConfluenceInput, setNewConfluenceInput] = useState("");
+  const firstFieldRef = React.useRef(null);
+
+  useEffect(() => {
+    if (firstFieldRef.current) firstFieldRef.current.focus();
+  }, []);
+
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const selectSymbol = (symbol) =>
+    setForm((f) => ({ ...f, symbol, contracts: isEdit ? f.contracts : String(SYMBOLS[symbol].defaultContracts) }));
+
+  const bumpContracts = (delta) =>
+    setForm((f) => {
+      const next = Math.max(1, (Number(f.contracts) || 0) + delta);
+      return { ...f, contracts: String(next) };
+    });
+
+  const computed = useMemo(() => computeTrade(form), [form.symbol, form.contracts, form.stop_loss, form.take_profit, form.result]);
+
+  const handleFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setForm((f) => ({ ...f, screenshot: reader.result }));
+    reader.readAsDataURL(file);
+  };
+
+  const toggleConfluence = (tag) => {
+    setForm((f) => {
+      const has = f.confluences.includes(tag);
+      return { ...f, confluences: has ? f.confluences.filter((c) => c !== tag) : [...f.confluences, tag] };
+    });
+  };
+
+  const addNewConfluence = () => {
+    const tag = newConfluenceInput.trim();
+    if (!tag) return;
+    setForm((f) => (f.confluences.includes(tag) ? f : { ...f, confluences: [...f.confluences, tag] }));
+    setNewConfluenceInput("");
+  };
+
+  const handleConfluenceInputKeyDown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addNewConfluence();
+    }
+  };
+
+  const isValid =
+    form.trade_date &&
+    form.stop_loss !== "" &&
+    form.take_profit !== "" &&
+    form.contracts !== "" &&
+    Number(form.contracts) > 0;
+
+  const effectivePnl = form.manual_pnl !== ""
+    ? Number(form.manual_pnl)
+    : computed.pnl;
+
+  const buildPayload = () => ({
+    trade_date: form.trade_date,
+    symbol: form.symbol,
+    contracts: Number(form.contracts),
+    direction: form.direction,
+    result: form.result,
+    stop_loss: Number(form.stop_loss),
+    take_profit: Number(form.take_profit),
+    rr: computed.rr,
+    realized_rr: computed.realized_rr,
+    risk_amount: computed.risk_amount,
+    pnl: effectivePnl,
+    note: form.note || null,
+    screenshot: form.screenshot || null,
+    setup: form.setup || null,
+    confluences: form.confluences && form.confluences.length ? form.confluences : null,
+  });
+
+  const submit = (e) => {
+    e.preventDefault();
+    setTouched(true);
+    if (!isValid) return;
+    onSubmit(buildPayload());
+  };
+
+  // Cmd/Ctrl + Enter zum schnellen Speichern, von überall im Formular
+  const handleKeyDown = (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      submit(e);
+    }
+  };
+
+  return (
+    <div className="overlay">
+      <form className="panel panel-trade-form" onSubmit={submit} onKeyDown={handleKeyDown}>
+        <div className="panel-head">
+          <span>{isEdit ? "Trade bearbeiten" : "Neuer Trade"}</span>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Schließen">
+            <Icon.Close />
+          </button>
+        </div>
+
+        <div className="trade-form-columns">
+          <div className="trade-form-col">
+            <div className="field">
+              <label>Symbol</label>
+              <div className="symbol-toggle">
+                {Object.entries(SYMBOLS).map(([key, cfg]) => (
+                  <button
+                    type="button"
+                    key={key}
+                    className={`symbol-btn ${form.symbol === key ? "active" : ""}`}
+                    onClick={() => selectSymbol(key)}
+                  >
+                    <span className="sym-name">{cfg.label}</span>
+                    <span className="sym-sub">{cfg.sub}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Setup</label>
+              <input
+                type="text"
+                list="setup-suggestions"
+                placeholder="z. B. Bias (leer lassen = kein Setup)"
+                value={form.setup}
+                onChange={set("setup")}
+              />
+              <datalist id="setup-suggestions">
+                {existingSetups.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+            </div>
+
+            <div className="field-grid">
+              <div className="field">
+                <label>Datum</label>
+                <input type="date" ref={firstFieldRef} value={form.trade_date} onChange={set("trade_date")} />
+              </div>
+              <div className="field">
+                <label>Contracts</label>
+                <div className="stepper">
+                  <button type="button" onClick={() => bumpContracts(-1)} aria-label="Weniger">−</button>
+                  <input type="number" min="1" step="1" value={form.contracts} onChange={set("contracts")} />
+                  <button type="button" onClick={() => bumpContracts(1)} aria-label="Mehr">+</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="field-grid">
+              <div className="field">
+                <label>Richtung</label>
+                <div className="dir-toggle">
+                  <button
+                    type="button"
+                    className={`dir-btn dir-long ${form.direction === "long" ? "active" : ""}`}
+                    onClick={() => setForm((f) => ({ ...f, direction: "long" }))}
+                  >
+                    Long
+                  </button>
+                  <button
+                    type="button"
+                    className={`dir-btn dir-short ${form.direction === "short" ? "active" : ""}`}
+                    onClick={() => setForm((f) => ({ ...f, direction: "short" }))}
+                  >
+                    Short
+                  </button>
+                </div>
+              </div>
+              <div className="field">
+                <label>Ergebnis</label>
+                <div className="dir-toggle" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+                  <button
+                    type="button"
+                    className={`dir-btn res-win ${form.result === "win" ? "active" : ""}`}
+                    onClick={() => setForm((f) => ({ ...f, result: "win" }))}
+                  >
+                    Win
+                  </button>
+                  <button
+                    type="button"
+                    className={`dir-btn res-be ${form.result === "be" ? "active" : ""}`}
+                    onClick={() => setForm((f) => ({ ...f, result: "be" }))}
+                  >
+                    BE
+                  </button>
+                  <button
+                    type="button"
+                    className={`dir-btn res-loss ${form.result === "loss" ? "active" : ""}`}
+                    onClick={() => setForm((f) => ({ ...f, result: "loss" }))}
+                  >
+                    Loss
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="field-grid">
+              <div className="field">
+                <label>Stop Loss (Punkte)</label>
+                <input type="number" step="any" placeholder="z. B. 12.5" value={form.stop_loss} onChange={set("stop_loss")} />
+              </div>
+              <div className="field">
+                <label>Take Profit (Punkte)</label>
+                <input type="number" step="any" placeholder="z. B. 30" value={form.take_profit} onChange={set("take_profit")} />
+              </div>
+            </div>
+
+            <div className="computed-box">
+              <div className="computed-item">
+                <span className="computed-label">Risk</span>
+                <span className="computed-value">{computed.risk_amount !== null ? fmtMoneyShort(-computed.risk_amount) : "—"}</span>
+              </div>
+              <div className="computed-item">
+                <span className="computed-label">RR</span>
+                <span className="computed-value">{computed.rr !== null ? computed.rr.toFixed(2) : "—"}</span>
+              </div>
+              <div className="computed-item">
+                <span className="computed-label">PnL</span>
+                <span className={`computed-value ${effectivePnl !== null && effectivePnl >= 0 ? "pos" : "neg"}`}>
+                  {effectivePnl !== null ? fmtMoneyShort(effectivePnl) : "—"}
+                </span>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Finaler PnL (optional — inkl. Fees/Spread)</label>
+              <input
+                type="number"
+                step="any"
+                placeholder={computed.pnl !== null ? `${computed.pnl.toFixed(2)} (berechnet)` : "z. B. -14.5"}
+                value={form.manual_pnl}
+                onChange={set("manual_pnl")}
+              />
+              <span style={{ fontSize: "11px", color: "var(--muted-light)", marginTop: "-2px" }}>
+                Leer lassen übernimmt den berechneten PnL. Trage hier den exakten Betrag ein, wenn Fees, Spread oder Slippage dazukommen.
+              </span>
+            </div>
+          </div>
+
+          <div className="trade-form-col">
+            <div className="field">
+              <label>Confluences</label>
+              <div className="confluence-groups">
+                {CONFLUENCE_CATEGORIES.map((cat) => (
+                  <div className="confluence-group" key={cat.label}>
+                    <span className="confluence-group-label">{cat.label}</span>
+                    <div className="confluence-group-chips">
+                      {cat.levels.map((level) => {
+                        const tag = `${cat.label} ${level}`;
+                        return (
+                          <button
+                            type="button"
+                            key={tag}
+                            className={`confluence-chip ${form.confluences.includes(tag) ? "active" : ""}`}
+                            onClick={() => toggleConfluence(tag)}
+                            title={tag}
+                          >
+                            {level}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="confluence-add-row">
+                <input
+                  type="text"
+                  placeholder="Neue Confluence, falls nicht oben vorhanden…"
+                  value={newConfluenceInput}
+                  onChange={(e) => setNewConfluenceInput(e.target.value)}
+                  onKeyDown={handleConfluenceInputKeyDown}
+                />
+                <button type="button" className="confluence-add-btn" onClick={addNewConfluence}>
+                  <Icon.Plus />
+                </button>
+              </div>
+              {form.confluences.length > 0 && (
+                <span style={{ fontSize: "11px", color: "var(--muted-light)" }}>
+                  {form.confluences.length} ausgewählt: {form.confluences.join(", ")}
+                </span>
+              )}
+            </div>
+
+            <div className="field">
+              <label>Notiz</label>
+              <textarea placeholder="Setup, Begründung, Lessons Learned…" value={form.note} onChange={set("note")} />
+            </div>
+
+            <div className="field">
+              <label>Screenshot</label>
+              {form.screenshot ? (
+                <div className="upload-preview">
+                  <img src={form.screenshot} alt="Screenshot Vorschau" />
+                  <button
+                    type="button"
+                    className="upload-remove"
+                    onClick={() => setForm((f) => ({ ...f, screenshot: "" }))}
+                    aria-label="Screenshot entfernen"
+                  >
+                    <Icon.Close />
+                  </button>
+                </div>
+              ) : (
+                <label className="upload-box">
+                  <Icon.Upload />
+                  <span>Screenshot hochladen</span>
+                  <input type="file" accept="image/*" onChange={handleFile} />
+                </label>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {touched && !isValid && (
+          <span className="field-error">Stop Loss, Take Profit und Contracts sind erforderlich</span>
+        )}
+
+        <button type="submit" className="btn-primary btn-block" disabled={saving}>
+          {saving ? "Speichert…" : isEdit ? "Änderungen speichern" : "Trade speichern"}
+          {!saving && <span className="kbd-hint">⌘⏎</span>}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function DayDetailModal({ day, onClose, onDelete, onEdit }) {
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="panel daydetail" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-head">
+          <span>{day.iso}{day.isHistoric ? " · Eval (historisch)" : ""}</span>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Schliessen">
+            <Icon.Close />
+          </button>
+        </div>
+        {day.isHistoric && (
+          <div style={{ fontSize: "11px", color: "var(--muted)", background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "4px", padding: "8px 12px", lineHeight: "1.5" }}>
+            Eval-Tag — Trades sind sichtbar, zaehlen aber nicht mehr zur Funded-Stage-Balance.
+          </div>
+        )}
+        <div className="daydetail-summary">
+          <span className={day.pnl >= 0 ? "pos" : "neg"} style={day.isHistoric ? { opacity: 0.5, textDecoration: "line-through" } : {}}>
+            {fmtMoney(day.pnl)}
+          </span>
+          <span className="muted">{day.trades.length} Trade{day.trades.length > 1 ? "s" : ""}</span>
+        </div>
+        <div className="trade-list">
+          {day.trades.map((t) => (
+            <TradeRow key={t.id} trade={t} onDelete={onDelete} onEdit={onEdit} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TradeRow({ trade, onDelete, onEdit }) {
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showShot, setShowShot] = useState(false);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    await onDelete(trade.id);
+    setDeleting(false);
+  };
+
+  if (confirming) {
+    return (
+      <div className="trade-row trade-row-confirm">
+        <span className="trade-meta">Trade wirklich löschen?</span>
+        <button type="button" className="confirm-btn confirm-no" onClick={() => setConfirming(false)} disabled={deleting}>
+          Abbrechen
+        </button>
+        <button type="button" className="confirm-btn confirm-yes" onClick={handleDelete} disabled={deleting}>
+          {deleting ? "Löscht…" : "Löschen"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <React.Fragment>
+      <div className="trade-row">
+        <span className={`dir-tag ${trade.direction === "long" ? "dir-long" : "dir-short"}`}>
+          {trade.direction === "long" ? "Long" : "Short"}
+        </span>
+        <span className="trade-meta">
+          {trade.symbol ?? ""} {trade.contracts ? `x${trade.contracts}` : ""} · SL {trade.stop_loss ?? "—"} · TP {trade.take_profit ?? "—"} · RR {trade.rr ? Number(trade.rr).toFixed(2) : "—"}{trade.setup ? ` · ${trade.setup}` : ""}
+        </span>
+        {trade.screenshot && (
+          <button type="button" className="trade-shot-btn" onClick={() => setShowShot(true)}>
+            <Icon.Image /> Foto
+          </button>
+        )}
+        <span className={`trade-pnl ${Number(trade.pnl) >= 0 ? "pos" : "neg"}`}>{fmtMoneyShort(Number(trade.pnl))}</span>
+        <div className="trade-row-actions">
+          <button type="button" className="icon-btn" onClick={() => onEdit(trade)} aria-label="Trade bearbeiten">
+            <Icon.Edit />
+          </button>
+          <button type="button" className="icon-btn delete-btn" onClick={() => setConfirming(true)} aria-label="Trade löschen">
+            <Icon.Trash />
+          </button>
+        </div>
+        {Array.isArray(trade.confluences) && trade.confluences.length > 0 && (
+          <div className="confluence-tags">
+            {trade.confluences.map((c) => (
+              <span key={c} className="confluence-chip-sm">{c}</span>
+            ))}
+          </div>
+        )}
+        {trade.note && <div className="trade-note">{trade.note}</div>}
+      </div>
+      {showShot && (
+        <div className="overlay" onClick={() => setShowShot(false)}>
+          <div className="panel" onClick={(e) => e.stopPropagation()} style={{ width: "auto" }}>
+            <div className="panel-head">
+              <span>Screenshot</span>
+              <button type="button" className="icon-btn" onClick={() => setShowShot(false)} aria-label="Schließen">
+                <Icon.Close />
+              </button>
+            </div>
+            <img className="shot-overlay-img" src={trade.screenshot} alt="Trade Screenshot" />
+          </div>
+        </div>
+      )}
+    </React.Fragment>
+  );
+}
+
+function ForwardTestPanel({ onClose, trades, existingConfluences, realizedRRForTrade, realizedPointsForTrade }) {
+  const [selected, setSelected] = useState([]);
+
+  const toggle = (tag) => {
+    setSelected((s) => (s.includes(tag) ? s.filter((t) => t !== tag) : [...s, tag]));
+  };
+
+  // Alt-Tags aus der Historie, die zu keiner der festen Kategorien gehören (z. B.
+  // frei eingetippte Confluences von vor der xN-Struktur) — werden als eigene
+  // "Weitere"-Zeile unterhalb der Kategorien angezeigt.
+  const categoryTagSet = useMemo(
+    () => new Set(CONFLUENCE_CATEGORIES.flatMap((cat) => cat.levels.map((level) => `${cat.label} ${level}`))),
+    []
+  );
+  const extraTags = useMemo(
+    () => existingConfluences.filter((c) => !categoryTagSet.has(c)),
+    [existingConfluences, categoryTagSet]
+  );
+
+  // Fuer jeden Trade: wie viele der ausgewaehlten Confluences sind vorhanden?
+  // Danach nach Match-Anzahl gruppiert ("mindestens N von M getroffen"), damit
+  // man sieht wie sich Winrate/Punkte verhalten, je naeher ein geplanter Trade
+  // an eine vollstaendige Uebereinstimmung mit der Historie kommt.
+  const result = useMemo(() => {
+    if (selected.length === 0) return null;
+    const scored = trades
+      .map((t) => {
+        const tags = Array.isArray(t.confluences) ? t.confluences : [];
+        const matchCount = selected.filter((s) => tags.includes(s)).length;
+        return { t, matchCount };
+      })
+      .filter((x) => x.matchCount > 0);
+
+    const buildStats = (subset) => {
+      const wins = subset.filter((t) => t.result === "win").length;
+      const losses = subset.filter((t) => t.result === "loss").length;
+      const bes = subset.filter((t) => t.result === "be").length;
+      const decided = wins + losses;
+      const rrVals = subset.map(realizedRRForTrade).filter((v) => v !== null && v !== undefined && !Number.isNaN(v));
+      const ptsVals = subset.map(realizedPointsForTrade).filter((v) => v !== null && v !== undefined && !Number.isNaN(v));
+      return {
+        count: subset.length,
+        wins, losses, bes,
+        winrate: decided ? (wins / decided) * 100 : 0,
+        avgRR: rrVals.length ? rrVals.reduce((s, v) => s + v, 0) / rrVals.length : 0,
+        avgPoints: ptsVals.length ? ptsVals.reduce((s, v) => s + v, 0) / ptsVals.length : 0,
+      };
+    };
+
+    const byThreshold = [];
+    for (let n = selected.length; n >= 1; n--) {
+      const subset = scored.filter((x) => x.matchCount >= n).map((x) => x.t);
+      if (!subset.length) continue;
+      byThreshold.push({ minMatch: n, ...buildStats(subset) });
+    }
+
+    const exact = scored.filter((x) => x.matchCount === selected.length).map((x) => x.t);
+
+    return {
+      totalSelected: selected.length,
+      matchedTradeCount: scored.length,
+      byThreshold,
+      exactStats: buildStats(exact),
+    };
+  }, [selected, trades, realizedRRForTrade, realizedPointsForTrade]);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="panel ft-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-head">
+          <span>Forward Test</span>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Schließen">
+            <Icon.Close />
+          </button>
+        </div>
+
+        <div className="notice">
+          Wähle die Confluences, die dein geplanter Trade erfüllt. Das System berechnet aus deiner Trade-Historie, wie sich Setups mit den gleichen (oder teilweise gleichen) Confluences bisher geschlagen haben.
+        </div>
+
+        <div>
+          <div className="ft-section-title">Confluences für diesen Trade</div>
+          <div className="confluence-groups">
+            {CONFLUENCE_CATEGORIES.map((cat) => (
+              <div className="confluence-group" key={cat.label}>
+                <span className="confluence-group-label">{cat.label}</span>
+                <div className="confluence-group-chips">
+                  {cat.levels.map((level) => {
+                    const tag = `${cat.label} ${level}`;
+                    return (
+                      <button
+                        type="button"
+                        key={tag}
+                        className={`confluence-chip ${selected.includes(tag) ? "active" : ""}`}
+                        onClick={() => toggle(tag)}
+                        title={tag}
+                      >
+                        {level}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            {extraTags.length > 0 && (
+              <div className="confluence-group">
+                <span className="confluence-group-label">Weitere</span>
+                <div className="confluence-group-chips">
+                  {extraTags.map((tag) => (
+                    <button
+                      type="button"
+                      key={tag}
+                      className={`confluence-chip ${selected.includes(tag) ? "active" : ""}`}
+                      onClick={() => toggle(tag)}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {result && (
+          <React.Fragment>
+            <div className="ft-section-divider" />
+            <div className="ft-results">
+              <div className="ft-section-title">Ergebnis bei exakter Übereinstimmung</div>
+              <div className="computed-box" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
+                <div className="computed-item">
+                  <span className="computed-label">Exakte Treffer</span>
+                  <span className="computed-value">{result.exactStats.count}</span>
+                </div>
+                <div className="computed-item">
+                  <span className="computed-label">Winrate</span>
+                  <span className={`computed-value ${result.exactStats.winrate >= 50 ? "pos" : "neg"}`}>
+                    {result.exactStats.count ? `${result.exactStats.winrate.toFixed(0)}%` : "—"}
+                  </span>
+                </div>
+                <div className="computed-item">
+                  <span className="computed-label">Ø RR</span>
+                  <span className="computed-value">{result.exactStats.count ? `${result.exactStats.avgRR.toFixed(2)}R` : "—"}</span>
+                </div>
+                <div className="computed-item">
+                  <span className="computed-label">Ø Punkte</span>
+                  <span className={`computed-value ${result.exactStats.avgPoints >= 0 ? "pos" : "neg"}`}>
+                    {result.exactStats.count ? `${result.exactStats.avgPoints >= 0 ? "+" : ""}${result.exactStats.avgPoints.toFixed(1)}` : "—"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="ft-section-title" style={{ marginTop: "14px" }}>
+                Nach Match-Anzahl (mindestens N von {result.totalSelected} Confluences)
+              </div>
+              <div className="trade-list">
+                {result.byThreshold.map((row) => (
+                  <div className="breakdown-row" key={row.minMatch} style={{ gap: "10px" }}>
+                    <span className="breakdown-label" style={{ width: "70px" }}>≥ {row.minMatch}/{result.totalSelected}</span>
+                    <div className="breakdown-bar-track">
+                      <div
+                        className={`breakdown-bar-fill ${row.winrate < 50 ? "neg" : ""}`}
+                        style={{ width: `${Math.min(100, row.winrate)}%` }}
+                      />
+                    </div>
+                    <span className={`breakdown-value ${row.winrate >= 50 ? "pos" : "neg"}`} style={{ width: "56px" }}>{row.winrate.toFixed(0)}%</span>
+                    <span className="breakdown-value" style={{ width: "66px" }}>{row.avgRR.toFixed(2)}R</span>
+                    <span className="breakdown-value" style={{ width: "78px" }}>{row.avgPoints >= 0 ? "+" : ""}{row.avgPoints.toFixed(1)} Pkt</span>
+                    <span className="breakdown-count">{row.count}x</span>
+                  </div>
+                ))}
+              </div>
+              <span style={{ fontSize: "11px", color: "var(--muted-light)" }}>
+                {result.matchedTradeCount} Trade{result.matchedTradeCount === 1 ? "" : "s"} in der Historie mit mindestens 1 Übereinstimmung.
+                {result.exactStats.count > 0 && result.exactStats.count < 10 ? " Achtung: kleine Stichprobe, Ergebnis mit Vorsicht interpretieren." : ""}
+              </span>
+            </div>
+          </React.Fragment>
+        )}
+
+        {!result && (
+          <span className="insight-sub">Wähle mindestens eine Confluence aus, um die Auswertung zu sehen.</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<TradingJournal />);
+</script>
+
+</body>
+</html>
