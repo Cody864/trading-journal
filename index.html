@@ -253,7 +253,7 @@
     letter-spacing: 0.04em; text-transform: uppercase; flex-shrink: 0;
   }
   .payout-banner-clear:hover { border-color: var(--muted-light); color: var(--text); background: var(--panel-2); }
-  .payout-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .payout-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
   @media (max-width: 720px) { .payout-grid { grid-template-columns: 1fr; } }
   .payout-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
   .payout-card-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; display: flex; align-items: center; gap: 8px; }
@@ -589,11 +589,11 @@ const FUNDED_BALANCE_OVERRIDE =
 /* ── Account-Regeln (Eval-Phase) ──
    Trailing Drawdown auf EOD-Basis, gecappt: die Minimum Loss Line (MLL)
    steigt mit dem höchsten je erreichten EOD-Stand mit, aber nur bis zu
-   einem Equity-Cap von 52.000 — danach bleibt die MLL fix bei 50.000,
+   einem Equity-Cap (Funded: 51.600, dann MLL fix bei 50.100) — danach bleibt die MLL fix,
    auch wenn die Equity weiter steigt.
 */
-const DD_BUFFER = 2000; // Funded Stage
-const DD_PEAK_CAP = 52000; // Funded Stage: ab diesem EOD-Peak greift die MLL nicht weiter mit
+const DD_BUFFER = 1500; // Funded Stage (Builder 50K Add-On: MLL 1.500$, gilt fuer Eval, Sim Funded und Live)
+const DD_PEAK_CAP = 51600; // Funded Stage: MLL sperrt bei EOD-Peak 51.600 -> Floor 50.100 (Start + 100$)
 // Eval Stage: MLL liegt immer exakt 1.500$ unter dem hoechsten EOD-Stand (trailing, ohne Cap),
 // z. B. Start 50.000 -> MLL 48.500, Peak 51.000 -> MLL 49.500.
 const EVAL_DD_BUFFER = 1500;
@@ -601,14 +601,17 @@ const EVAL_DD_PEAK_CAP = Infinity;
 const ACCOUNT_PASS_TARGET = 53000; // Equity-Ziel, ab dem der Account "passed" ist
 
 /* ── Payout-Phase (nach Eval Passed) ──
-   5 Trading-Tage mit jeweils min. 250$ Tagesgewinn (nicht am Stück),
-   50%-Consistency-Regel (kein Tag > 50% des Gesamtgewinns seit Pass),
-   Trailing-DD-Cap endet bei 52.100.
+   MyFundedFutures Builder 50K Add-On (Sim Funded): mind. 2 Handelstage pro Zyklus, MLL 1.500$, Buffer 1.600$,
+   min. 500$ Netto-Gewinn ueber dem Buffer bzw. seit dem letzten Payout, max. 2.000$ pro Payout (80/20),
+   50%-Consistency-Regel (kein Tag > 50% des Zyklus-Gewinns),
+   Trailing-DD-Cap endet bei 51.600 (Floor 50.100).
 */
-const PAYOUT_MIN_DAY_PROFIT = 250;
-const PAYOUT_MIN_DAYS = 5;
+const PAYOUT_BUFFER = 1600; // = MLL + 100$ // Buffer ueber Startkapital, der vor dem ersten Payout geclearet sein muss
+const PAYOUT_MIN_NET_PROFIT = 500; // min. Netto-Gewinn ueber Buffer (1. Payout) bzw. seit letztem Payout
+const PAYOUT_MAX_AMOUNT = 2000; // max. Auszahlung pro Zyklus
+const PAYOUT_MIN_DAYS = 2; // min. Handelstage pro Payout-Zyklus
 const PAYOUT_CONSISTENCY_PCT = 50;
-const PAYOUT_DD_PEAK_CAP = 52100;
+const PAYOUT_DD_PEAK_CAP = 51600;
 
 // Mindestanzahl an Trades, ab der eine Confluence-Kombination im "Top-Kombinationen"-Ranking
 // berücksichtigt wird — verhindert, dass 1-2 Zufallstreffer als "100% Winrate" auftauchen.
@@ -834,6 +837,15 @@ function TradingJournal() {
   const [fundedActivatedAt, setFundedActivatedAt] = useState(() => {
     try { return localStorage.getItem("journal_funded_activated_at") || null; } catch { return null; }
   });
+
+  // Datum des letzten Payouts = Start des aktuellen Payout-Zyklus (pro Profil gespeichert)
+  const [lastPayoutDate, setLastPayoutDate] = useState(() => {
+    try { return localStorage.getItem("journal_funded_last_payout") || ""; } catch { return ""; }
+  });
+  const updateLastPayoutDate = useCallback((v) => {
+    try { localStorage.setItem("journal_funded_last_payout", v || ""); } catch {}
+    setLastPayoutDate(v || "");
+  }, []);
 
   const evalPassed = fundedStage;
   const evalPassedDate = fundedStartDate;
@@ -1345,31 +1357,24 @@ function TradingJournal() {
   const payoutStats = useMemo(() => {
     if (!evalPassed) return null;
 
-    const relevantDays = evalPassedDate
+    const baseDays = evalPassedDate
       ? accountStats.tradingDays.filter((d) => d.date >= evalPassedDate)
       : accountStats.tradingDays;
+    // Payout-Zyklus: nur Tage NACH dem letzten Payout zaehlen
+    const relevantDays = lastPayoutDate ? baseDays.filter((d) => d.date > lastPayoutDate) : baseDays;
 
-    // Tage VOR dem aktuellen Funded-Stage-Start (evalPassedDate), die aus der
-    // KOMPLETTEN Trade-Historie (nicht nur den seit der Aktivierung gezaehlten
-    // fundedTrades) berechnet werden. So zaehlen bereits erzielte Winning-Days von
-    // vor dem Neustart automatisch mit — aus echten Trade-Daten, nicht aus einer
-    // manuell eingetragenen Zahl.
-    const preActivationDayMap = new Map();
-    if (evalPassedDate) {
-      trades.forEach((t) => {
-        if (t.trade_date >= evalPassedDate) return;
-        if (!preActivationDayMap.has(t.trade_date)) preActivationDayMap.set(t.trade_date, 0);
-        preActivationDayMap.set(t.trade_date, preActivationDayMap.get(t.trade_date) + Number(t.pnl || 0));
-      });
-    }
-    const preActivationQualifyingDays = Array.from(preActivationDayMap.values())
-      .filter((pnl) => pnl >= PAYOUT_MIN_DAY_PROFIT).length;
 
-    // 5-Tage-Regel: Tage mit min. 250$ Gewinn, müssen nicht aufeinanderfolgen.
-    const qualifyingDays = relevantDays.filter((d) => d.pnl >= PAYOUT_MIN_DAY_PROFIT);
-    const effectiveQualifyingCount = qualifyingDays.length + preActivationQualifyingDays;
+    // Min. Handelstage pro Zyklus (Builder 50K): mind. 2 Tage mit Trades seit Start bzw. letztem Payout.
+    const qualifyingDays = relevantDays; // jeder Handelstag im Zyklus zaehlt
+    const effectiveQualifyingCount = qualifyingDays.length;
     const daysHit = Math.min(effectiveQualifyingCount, PAYOUT_MIN_DAYS);
     const daysPassed = effectiveQualifyingCount >= PAYOUT_MIN_DAYS;
+
+    // Erster Payout: Gewinn ueber dem Buffer (Start + 1.600$). Danach: Netto-Gewinn seit letztem Payout.
+    const cycleNetProfit = relevantDays.reduce((s, d) => s + d.pnl, 0);
+    const profitAboveBuffer = lastPayoutDate ? cycleNetProfit : accountStats.balance - (STARTING_BALANCE + PAYOUT_BUFFER);
+    const profitPassed = profitAboveBuffer >= PAYOUT_MIN_NET_PROFIT;
+    const payoutAmount = Math.max(0, Math.min(profitAboveBuffer, PAYOUT_MAX_AMOUNT));
 
     // 50%-Consistency-Regel: kein einzelner Tag darf mehr als 50% des
     // gesamten Nettogewinns seit Eval-Passed ausmachen
@@ -1395,15 +1400,15 @@ function TradingJournal() {
     const ddMaxSpan = Math.max(1, eodPeak - mll);
     const ddRiskPct = Math.max(0, Math.min(100, 100 - (ddBufferRemaining / ddMaxSpan) * 100));
 
-    const allRulesPassed = daysPassed && consistencyPassed;
+    const allRulesPassed = daysPassed && consistencyPassed && profitPassed;
 
     return {
       relevantDays, qualifyingDays, effectiveQualifyingCount, daysHit, daysPassed,
       netProfitSincePass, biggestDay, consistencyPct, consistencyPassed,
       eodPeak, mll, ddBufferRemaining, ddRiskPct,
-      allRulesPassed,
+      allRulesPassed, cycleNetProfit, profitAboveBuffer, profitPassed, payoutAmount,
     };
-  }, [evalPassed, evalPassedDate, accountStats.tradingDays, accountStats.balance, trades]);
+  }, [evalPassed, evalPassedDate, lastPayoutDate, accountStats.tradingDays, accountStats.balance, trades]);
 
   const calendar = useMemo(() => {
     const { year, month } = cursor;
@@ -1824,7 +1829,7 @@ function TradingJournal() {
           <div className="payout-card">
             <div className="payout-card-title">
               <span className={`payout-status-dot ${payoutStats.daysPassed ? "ok" : ""}`} />
-              5 Trading-Tage à 250$+
+              Mind. 2 Handelstage im Zyklus
             </div>
             <span className="payout-main">{payoutStats.daysHit} / {PAYOUT_MIN_DAYS}</span>
             <div className="payout-days">
@@ -1834,7 +1839,7 @@ function TradingJournal() {
                 </span>
               ))}
             </div>
-            <span className="payout-sub">Müssen nicht aufeinanderfolgen — {payoutStats.effectiveQualifyingCount} Tag{payoutStats.effectiveQualifyingCount === 1 ? "" : "e"} bisher qualifiziert.</span>
+            <span className="payout-sub">Zyklus seit {lastPayoutDate ? `letztem Payout (${lastPayoutDate})` : "Funded-Start"} — {payoutStats.effectiveQualifyingCount} Handelstag{payoutStats.effectiveQualifyingCount === 1 ? "" : "e"} bisher.</span>
           </div>
 
           <div className="payout-card">
@@ -1845,8 +1850,8 @@ function TradingJournal() {
             <span className="payout-main">{payoutStats.consistencyPct.toFixed(1)}%</span>
             <span className="payout-sub">
               {payoutStats.consistencyPassed
-                ? "Bester Tag bleibt unter 50% des Gesamtgewinns."
-                : "Achtung: ein Tag dominiert über 50% des Gesamtgewinns seit Pass."}
+                ? "Bester Tag bleibt unter 50% des Zyklus-Gewinns."
+                : "Achtung: ein Tag dominiert über 50% des Zyklus-Gewinns."}
               {" "}Größter Tag: {fmtMoneyShort(payoutStats.biggestDay)}
             </span>
           </div>
@@ -1854,13 +1859,28 @@ function TradingJournal() {
           <div className="payout-card">
             <div className="payout-card-title">
               <span className="payout-status-dot ok" />
-              Drawdown (Payout-Cap 52.100)
+              Drawdown (Payout-Cap 51.600)
             </div>
             <span className="payout-main">{fmtMoneyShort(-Math.max(0, payoutStats.eodPeak - accountStats.balance))}</span>
             <div className="risk-track">
               <div className="risk-fill dd" style={{ width: `${payoutStats.ddRiskPct}%` }} />
             </div>
             <span className="payout-sub">MLL: {fmtMoney(payoutStats.mll)} · Puffer: {fmtMoneyShort(payoutStats.ddBufferRemaining)}</span>
+          </div>
+
+          <div className="payout-card">
+            <div className="payout-card-title">
+              <span className={`payout-status-dot ${payoutStats.profitPassed ? "ok" : ""}`} />
+              {lastPayoutDate ? "Profit seit letztem Payout" : "Profit über Buffer (1.600$)"}
+            </div>
+            <span className="payout-main">{fmtMoneyShort(payoutStats.profitAboveBuffer)}</span>
+            <span className="payout-sub">
+              Min. $500 nötig · auszahlbar: {payoutStats.profitPassed ? fmtMoney(payoutStats.payoutAmount) : "—"} (max. $2.000, 80/20)
+            </span>
+            <label className="payout-sub" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              Letzter Payout
+              <input type="date" style={friendsDateStyle} value={lastPayoutDate} onChange={(e) => updateLastPayoutDate(e.target.value)} />
+            </label>
           </div>
         </div>
       )}
@@ -2947,7 +2967,17 @@ function loadFriendsLS() {
     const v = JSON.parse(localStorage.getItem(FRIENDS_LS_KEY) || "[]");
     manual = Array.isArray(v) ? v.filter((f) => !f.builtIn) : [];
   } catch {}
-  return [...builtInFriends(), ...manual];
+  // Manuell hinzugefügte Freunde, die bereits als Profil existieren (gleiche Datenbank-URL), nicht doppelt anzeigen
+  const builtIn = builtInFriends();
+  const known = new Set([...builtIn.map((f) => normalizeSupabaseUrl(f.url)), normalizeSupabaseUrl(SUPABASE_URL)]);
+  const seen = new Set();
+  const manualUnique = manual.filter((f) => {
+    const u = normalizeSupabaseUrl(f.url);
+    if (known.has(u) || seen.has(u)) return false;
+    seen.add(u);
+    return true;
+  });
+  return [...builtIn, ...manualUnique];
 }
 function saveFriendsLS(list) {
   try { localStorage.setItem(FRIENDS_LS_KEY, JSON.stringify(list.filter((f) => !f.builtIn))); } catch {}
@@ -3042,8 +3072,13 @@ function summarizeTrades(list) {
 }
 
 const fmtPFValue = (v) => (v === Infinity ? "∞" : v.toFixed(2));
-const friendsCard = { background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "10px", padding: "18px 20px" };
-const friendsSectionTitle = { fontSize: "11px", color: "var(--muted-light)", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: "14px", fontWeight: 700 };
+// Zweispaltiges Raster (fällt auf schmalen Bildschirmen automatisch auf eine Spalte zurück)
+// Masonry-Layout: Karten fließen spaltenweise (ca. 470px breit) und füllen Lücken automatisch
+const friendsMasonry = { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", columnGap: "14px", rowGap: 0, alignItems: "stretch" };
+const friendsGrid3 = { display: "contents" };
+const friendsGrid2 = { display: "contents" };
+const friendsCard = { background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "10px", padding: "14px 16px", breakInside: "avoid", marginBottom: "14px" };
+const friendsSectionTitle = { fontSize: "11px", color: "var(--muted-light)", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: "10px", fontWeight: 700 };
 const friendsSeg = (active) => ({
   background: active ? "rgba(255,255,255,0.10)" : "transparent",
   border: `1px solid ${active ? "var(--muted-light)" : "var(--line)"}`,
@@ -3444,7 +3479,7 @@ function FriendsBreakdown({ mine, theirs, myName, theirName, keyFn, order, limit
     const decided = e.w + e.l;
     return (
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "8px", marginBottom: "5px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", columnGap: "8px", marginBottom: "4px" }}>
           <b style={{ fontSize: "13px", color: e.pnl >= 0 ? "#fff" : "var(--red)" }}>{fmtMoneyShort(e.pnl)}</b>
           <span style={{ fontSize: "11px", color: "var(--muted-light)" }}>
             {e.n}x · WR {decided ? ((e.w / decided) * 100).toFixed(0) : "—"}% · Ø {e.rrN ? (e.rr / e.rrN).toFixed(2) : "—"}R
@@ -3459,13 +3494,13 @@ function FriendsBreakdown({ mine, theirs, myName, theirName, keyFn, order, limit
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "190px 1fr 1fr", gap: "22px", paddingBottom: "8px", borderBottom: "1px solid var(--line)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "112px 1fr 1fr", gap: "14px", paddingBottom: "6px", borderBottom: "1px solid var(--line)" }}>
         <span />
         <span style={{ color: ME_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{myName}</span>
         <span style={{ color: FRIEND_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{theirName}</span>
       </div>
       {data.keys.map((k) => (
-        <div key={k} style={{ display: "grid", gridTemplateColumns: "190px 1fr 1fr", gap: "22px", alignItems: "center", padding: "11px 0", borderBottom: "1px solid var(--line)" }}>
+        <div key={k} style={{ display: "grid", gridTemplateColumns: "112px 1fr 1fr", gap: "14px", alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--line)" }}>
           <span style={{ fontSize: "12px", color: "var(--muted-light)", wordBreak: "break-word" }}>{k}</span>
           {cell(data.a.get(k), ME_COLOR)}
           {cell(data.b.get(k), FRIEND_COLOR)}
@@ -3579,7 +3614,7 @@ function FriendsPanel({ onClose, myTrades }) {
   const themIsXfa = themPhase === "xfa";
 
   const bothTrades = useMemo(() => [...myTrades, ...theirTrades], [myTrades, theirTrades]);
-  const symbolOptions = useMemo(() => Array.from(new Set(bothTrades.map((t) => t.symbol).filter(Boolean))).sort(), [bothTrades]);
+  const symbolOptions = useMemo(() => Array.from(new Set(bothTrades.map((t) => (t.symbol ? marketOf(t.symbol) : null)).filter(Boolean))).sort(), [bothTrades]);
   const setupOptions = useMemo(() => Array.from(new Set(bothTrades.map((t) => t.setup).filter(Boolean))).sort(), [bothTrades]);
   const confOptions = useMemo(() => {
     const s = new Set();
@@ -3622,7 +3657,7 @@ function FriendsPanel({ onClose, myTrades }) {
           if (myIsXfa && !isXfaTrade(t, boundaryMe)) return false;
         } else if (themIsXfa ? !isXfaTrade(t, boundaryThem) : (boundaryThem && isXfaTrade(t, boundaryThem))) return false;
       }
-      if (symbolF !== "all" && t.symbol !== symbolF) return false;
+      if (symbolF !== "all" && (!t.symbol || marketOf(t.symbol) !== symbolF)) return false;
       if (dirF !== "all" && t.direction !== dirF) return false;
       if (setupF !== "all" && t.setup !== setupF) return false;
       if (confF !== "all" && !(Array.isArray(t.confluences) && t.confluences.includes(confF))) return false;
@@ -3788,7 +3823,7 @@ function FriendsPanel({ onClose, myTrades }) {
   return (
     <React.Fragment>
       <div className="overlay" onClick={onClose}>
-        <div className="panel" style={{ width: "1240px", maxHeight: "92vh" }} onClick={(e) => e.stopPropagation()}>
+        <div className="panel" style={{ width: "1700px", maxWidth: "97vw", maxHeight: "95vh" }} onClick={(e) => e.stopPropagation()}>
           <div className="panel-head">
             <span>Freunde — Vergleich</span>
             <button type="button" className="icon-btn" onClick={onClose} aria-label="Schließen">
@@ -3998,8 +4033,9 @@ function FriendsPanel({ onClose, myTrades }) {
                     </div>
                   )}
 
+                  <div style={friendsMasonry}>
                   {duel.total > 0 && (
-                    <div style={friendsCard}>
+                    <div style={{ ...friendsCard, gridColumn: "1 / -1", gridRow: 1 }}>
                       <div style={friendsSectionTitle}>Tagesduell · {duel.total} gemeinsame Handelstage</div>
                       <div style={{ display: "flex", height: "10px", borderRadius: "5px", overflow: "hidden", background: "#1a1a1a" }}>
                         <div style={{ width: `${(duel.w / duel.total) * 100}%`, background: ME_COLOR }} />
@@ -4014,12 +4050,13 @@ function FriendsPanel({ onClose, myTrades }) {
                     </div>
                   )}
 
-                  <div style={friendsCard}>
+                  <div style={friendsGrid2}>
+                  <div style={{ ...friendsCard, gridColumn: 1, gridRow: 2 }}>
                     <div style={friendsSectionTitle}>Equity-Vergleich</div>
                     <FriendsEquityChart mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} />
                   </div>
 
-                  <div style={friendsCard}>
+                  <div style={{ ...friendsCard, gridColumn: "1 / span 2", gridRow: 3 }}>
                     <div style={friendsSectionTitle}>Statistiken</div>
                     <div style={{ display: "grid", gridTemplateColumns: "190px 1fr 1fr", gap: "22px", paddingBottom: "8px", borderBottom: "1px solid var(--line)" }}>
                       <span />
@@ -4052,39 +4089,36 @@ function FriendsPanel({ onClose, myTrades }) {
                       );
                     })}
                   </div>
-                  <div style={friendsCard}>
+                  </div>
+
+                  <div style={friendsGrid3}>
+                  <div style={{ ...friendsCard, gridColumn: 2, gridRow: 2 }}>
                     <div style={friendsSectionTitle}>Nach Wochentag</div>
                     <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} keyFn={friendsWeekdayKey} order={WEEKDAY_FULL} />
                   </div>
 
-                  <div style={friendsCard}>
-                    <div style={friendsSectionTitle}>Nach Symbol</div>
-                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} keyFn={(t) => t.symbol} />
+                  <div style={{ gridColumn: 3, gridRow: "2 / span 2", display: "flex", flexDirection: "column" }}>
+                  <div style={{ ...friendsCard, flex: "1 1 auto" }}>
+                    <div style={friendsSectionTitle}>Nach Markt (Mini + Micro zusammen)</div>
+                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} keyFn={(t) => (t.symbol ? marketOf(t.symbol) : null)} />
                   </div>
 
-                  <div style={friendsCard}>
+                  <div style={{ ...friendsCard, flex: "1 1 auto" }}>
                     <div style={friendsSectionTitle}>Nach Richtung</div>
                     <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} keyFn={(t) => (t.direction === "long" ? "Long" : t.direction === "short" ? "Short" : null)} order={["Long", "Short"]} />
                   </div>
 
-                  <div style={friendsCard}>
-                    <div style={friendsSectionTitle}>Nach geplantem RR (Ziel)</div>
-                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} keyFn={friendsRRBucket} order={FRIENDS_RR_ORDER} />
-                  </div>
-
-                  <div style={friendsCard}>
+                  <div style={{ ...friendsCard, flex: "1 1 auto" }}>
                     <div style={friendsSectionTitle}>Nach Monat</div>
                     <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} keyFn={(t) => (t.trade_date ? t.trade_date.slice(0, 7) : null)} chrono />
                   </div>
 
-                  <div style={friendsCard}>
-                    <div style={friendsSectionTitle}>Nach Setup</div>
-                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} keyFn={(t) => t.setup} />
+                  <div style={{ ...friendsCard, order: -1, flex: "1 1 auto" }}>
+                    <div style={friendsSectionTitle}>Nach Confluence (Top 5)</div>
+                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} keyFn={(t) => (Array.isArray(t.confluences) ? t.confluences : [])} limit={5} />
                   </div>
-
-                  <div style={friendsCard}>
-                    <div style={friendsSectionTitle}>Nach Confluence (Top 12)</div>
-                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} keyFn={(t) => (Array.isArray(t.confluences) ? t.confluences : [])} />
+                  </div>
+                  </div>
                   </div>
                 </React.Fragment>
               )}
