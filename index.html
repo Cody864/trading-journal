@@ -497,8 +497,64 @@ const { useState, useEffect, useMemo, useCallback } = React;
    Findest du in: Supabase -> Project Settings -> API
    ============================================================ */
 
-const SUPABASE_URL = "https://pjywivxovkjkzydmjftp.supabase.co"; // <-- HIER EINTRAGEN
-const SUPABASE_ANON_KEY = "sb_publishable_xwsKMkeuBJmza9u9W24AIw_dQMEb14r"; // <-- HIER EINTRAGEN
+/* ── Profile ──
+   Beim Oeffnen waehlt man sein Profil. Das gewaehlte Profil bestimmt, mit welcher
+   Supabase-Datenbank das Journal arbeitet. Alle ANDEREN Profile erscheinen automatisch
+   unter "Freunde" zum Vergleichen. Name/Daten hier zentral pflegen — dann reicht
+   eine gemeinsame Datei fuer alle.
+   fundedBalanceOverride: null = deaktiviert (nutzt STARTING_BALANCE).
+   legacyOwner: uebernimmt die bisherigen (nicht profilgebundenen) Funded-Stage-Einstellungen. */
+const PROFILES = [
+  {
+    id: "cody",
+    name: "Cody",
+    url: "https://pjywivxovkjkzydmjftp.supabase.co",
+    key: "sb_publishable_xwsKMkeuBJmza9u9W24AIw_dQMEb14r",
+    fundedBalanceOverride: 48224,
+    legacyOwner: true,
+  },
+  {
+    id: "lukas",
+    name: "Lukas",
+    url: "https://ffkhmjghkudktbsqlucu.supabase.co",
+    key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZma2htamdoa3Vka3Ric3FsdWN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0ODA5ODUsImV4cCI6MjEwNzA1Njk4NX0.tSjNJyT74OlJuUDdopEMy-CltLYcPcNQmzElFbddgyQ",
+    fundedBalanceOverride: null,
+    legacyOwner: false,
+  },
+];
+const PROFILE_LS_KEY = "journal_profile";
+const ACTIVE_PROFILE = (() => {
+  try {
+    const id = localStorage.getItem(PROFILE_LS_KEY);
+    return PROFILES.find((p) => p.id === id) || null;
+  } catch { return null; }
+})();
+const switchProfile = () => {
+  try { localStorage.removeItem(PROFILE_LS_KEY); } catch {}
+  window.location.reload();
+};
+
+// Funded-Stage-Einstellungen (journal_funded_*) pro Profil getrennt speichern, damit sich
+// zwei Profile im selben Browser nicht gegenseitig die Konto-Phase ueberschreiben.
+if (ACTIVE_PROFILE) {
+  const rawGet = Storage.prototype.getItem;
+  const rawSet = Storage.prototype.setItem;
+  const nsKey = (k) => (typeof k === "string" && k.startsWith("journal_funded") ? `${k}__${ACTIVE_PROFILE.id}` : k);
+  // Einmalige Uebernahme der bisherigen Werte fuer den urspruenglichen Besitzer.
+  if (ACTIVE_PROFILE.legacyOwner) {
+    ["journal_funded_stage", "journal_funded_start_date", "journal_funded_activated_at"].forEach((k) => {
+      try {
+        const legacy = rawGet.call(localStorage, k);
+        if (legacy !== null && rawGet.call(localStorage, nsKey(k)) === null) rawSet.call(localStorage, nsKey(k), legacy);
+      } catch {}
+    });
+  }
+  Storage.prototype.getItem = function (k) { return rawGet.call(this, nsKey(k)); };
+  Storage.prototype.setItem = function (k, v) { return rawSet.call(this, nsKey(k), v); };
+}
+
+const SUPABASE_URL = ACTIVE_PROFILE ? ACTIVE_PROFILE.url : "";
+const SUPABASE_ANON_KEY = ACTIVE_PROFILE ? ACTIVE_PROFILE.key : "";
 const STARTING_BALANCE = 50000;
 // Trades vor diesem Datum zaehlen nicht mehr in die Performance-Stats (Profit Factor,
 // Winrate, Avg RR, Streaks, Bester/Schlechtester Trade, Nach-Wochentag etc.), bleiben
@@ -509,7 +565,8 @@ const STATS_CUTOFF_DATE = "2026-09-01";
 // kann. Ersetzt STARTING_BALANCE als Ausgangspunkt fuer die Funded-Stage-Balance/
 // Drawdown-Berechnung, damit die Balance korrekt weiterlaeuft, ohne die alten Trades
 // erneut einzeln erfassen zu muessen. Auf STARTING_BALANCE setzen, um das zu deaktivieren.
-const FUNDED_BALANCE_OVERRIDE = 48224;
+const FUNDED_BALANCE_OVERRIDE =
+  ACTIVE_PROFILE && ACTIVE_PROFILE.fundedBalanceOverride != null ? ACTIVE_PROFILE.fundedBalanceOverride : STARTING_BALANCE;
 
 /* Optional, aber empfohlen: lege in Supabase eine Spalte "realized_rr" (Typ: float8,
    nullable) in der Tabelle "Trades" an, damit der realisierte RR-Wert dauerhaft
@@ -751,6 +808,7 @@ function TradingJournal() {
   const [error, setError] = useState(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [forwardTestOpen, setForwardTestOpen] = useState(false);
+  const [friendsOpen, setFriendsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cursor, setCursor] = useState(() => {
     const n = new Date();
@@ -1613,6 +1671,12 @@ function TradingJournal() {
               Eval Passed ✓
             </button>
           )}
+          <button className="btn-secondary" onClick={switchProfile} title="Profil wechseln">
+            {ACTIVE_PROFILE ? ACTIVE_PROFILE.name : "Profil"} ⇄
+          </button>
+          <button className="btn-secondary" onClick={() => setFriendsOpen(true)} title="Kalender, Stats & Equity mit Freunden vergleichen">
+            Freunde
+          </button>
           <button className="btn-secondary" onClick={() => setForwardTestOpen(true)}>
             Forward Test
           </button>
@@ -2072,6 +2136,10 @@ function TradingJournal() {
           existingSetups={existingSetups}
           existingConfluences={confluenceOptions}
         />
+      )}
+
+      {friendsOpen && (
+        <FriendsPanel onClose={() => setFriendsOpen(false)} myTrades={trades} />
       )}
 
       {forwardTestOpen && (
@@ -2856,8 +2924,432 @@ function ForwardTestPanel({ onClose, trades, existingConfluences, realizedRRForT
   );
 }
 
+/* ============================================================
+   FREUNDE — Vergleich mit anderen Journals (nur lesend!)
+   Pro Freund werden Name, Supabase-URL und anon Key im localStorage
+   dieses Browsers gespeichert. Es werden ausschliesslich GET-Requests
+   auf die Tabelle "Trades" des Freundes gemacht — nie schreibend.
+   ============================================================ */
+const FRIENDS_LS_KEY = "journal_friends";
+const FRIEND_COLOR = "#4da3ff";
+const ME_COLOR = "#ffffff";
+
+// Alle anderen Profile aus PROFILES sind automatisch Freunde (fest, nicht entfernbar).
+// Zusaetzlich koennen manuell weitere Freunde hinzugefuegt werden (im Browser gespeichert).
+function builtInFriends() {
+  return PROFILES
+    .filter((p) => !ACTIVE_PROFILE || p.id !== ACTIVE_PROFILE.id)
+    .map((p) => ({ id: `profile_${p.id}`, name: p.name, url: p.url, key: p.key, builtIn: true }));
+}
+function loadFriendsLS() {
+  let manual = [];
+  try {
+    const v = JSON.parse(localStorage.getItem(FRIENDS_LS_KEY) || "[]");
+    manual = Array.isArray(v) ? v.filter((f) => !f.builtIn) : [];
+  } catch {}
+  return [...builtInFriends(), ...manual];
+}
+function saveFriendsLS(list) {
+  try { localStorage.setItem(FRIENDS_LS_KEY, JSON.stringify(list.filter((f) => !f.builtIn))); } catch {}
+}
+
+function ProfilePicker() {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "28px", padding: "24px" }}>
+      <img src="sharingan.png" alt="Logo" style={{ width: "220px", height: "100px", borderRadius: "10px" }} />
+      <div style={{ fontSize: "13px", letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--muted-light)" }}>Wer bist du?</div>
+      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", justifyContent: "center" }}>
+        {PROFILES.map((p) => (
+          <button
+            key={p.id}
+            className="btn-secondary"
+            style={{ padding: "22px 44px", fontSize: "16px" }}
+            onClick={() => {
+              try { localStorage.setItem(PROFILE_LS_KEY, p.id); } catch {}
+              window.location.reload();
+            }}
+          >
+            {p.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+function normalizeSupabaseUrl(u) {
+  return String(u || "").trim().replace(/\/rest\/v1.*$/, "").replace(/\/+$/, "");
+}
+
+function tradeRR(t) {
+  if (t.result === "be") return 0;
+  if (t.realized_rr !== null && t.realized_rr !== undefined) return Number(t.realized_rr);
+  if (t.result === "loss") return t.rr !== null && t.rr !== undefined ? -1 : null;
+  if (t.result === "win") return t.rr !== null && t.rr !== undefined ? Number(t.rr) : null;
+  return null;
+}
+
+function summarizeTrades(list) {
+  const wins = list.filter((t) => t.result === "win");
+  const losses = list.filter((t) => t.result === "loss");
+  const decided = wins.length + losses.length;
+  const pnl = list.reduce((s, t) => s + Number(t.pnl || 0), 0);
+  const grossProfit = wins.reduce((s, t) => s + Number(t.pnl || 0), 0);
+  const grossLoss = Math.abs(losses.reduce((s, t) => s + Number(t.pnl || 0), 0));
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+  const rrs = list.map(tradeRR).filter((v) => v !== null && !Number.isNaN(v));
+  const avgRR = rrs.length ? rrs.reduce((s, r) => s + r, 0) / rrs.length : 0;
+
+  const dayMap = new Map();
+  list.forEach((t) => dayMap.set(t.trade_date, (dayMap.get(t.trade_date) || 0) + Number(t.pnl || 0)));
+  const days = Array.from(dayMap.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  const greenDays = days.filter(([, v]) => v > 0).length;
+  const dayVals = days.map(([, v]) => v);
+
+  let run = 0, peak = 0, maxDD = 0;
+  days.forEach(([, v]) => {
+    run += v;
+    if (run > peak) peak = run;
+    if (peak - run > maxDD) maxDD = peak - run;
+  });
+
+  return {
+    count: list.length,
+    winrate: decided ? (wins.length / decided) * 100 : 0,
+    profitFactor,
+    avgRR,
+    pnl,
+    expectancy: decided ? (grossProfit - grossLoss) / decided : 0,
+    dayCount: days.length,
+    greenDayPct: days.length ? (greenDays / days.length) * 100 : 0,
+    bestDay: dayVals.length ? Math.max(...dayVals) : 0,
+    worstDay: dayVals.length ? Math.min(...dayVals) : 0,
+    maxDD,
+  };
+}
+
+function FriendsEquityChart({ mine, theirs, myName, theirName }) {
+  const W = 640, H = 170, P = 10;
+  const sumByDate = (list) => {
+    const m = new Map();
+    list.forEach((t) => m.set(t.trade_date, (m.get(t.trade_date) || 0) + Number(t.pnl || 0)));
+    return m;
+  };
+  const a = sumByDate(mine), b = sumByDate(theirs);
+  const dates = Array.from(new Set([...a.keys(), ...b.keys()])).sort();
+  if (dates.length === 0) return <div className="notice">Keine Trades im gewählten Zeitraum.</div>;
+
+  let ra = 0, rb = 0;
+  const pa = [], pb = [];
+  dates.forEach((d) => {
+    ra += a.get(d) || 0;
+    rb += b.get(d) || 0;
+    pa.push(ra);
+    pb.push(rb);
+  });
+  const all = [0, ...pa, ...pb];
+  const min = Math.min(...all), max = Math.max(...all);
+  const span = max - min || 1;
+  const x = (i) => (dates.length === 1 ? W / 2 : P + (i / (dates.length - 1)) * (W - 2 * P));
+  const y = (v) => H - P - ((v - min) / span) * (H - 2 * P);
+  const path = (arr) => arr.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        <line x1={P} x2={W - P} y1={y(0)} y2={y(0)} stroke="#333" strokeDasharray="4 4" />
+        <path d={path(pa)} fill="none" stroke={ME_COLOR} strokeWidth="2" />
+        <path d={path(pb)} fill="none" stroke={FRIEND_COLOR} strokeWidth="2" />
+      </svg>
+      <div style={{ display: "flex", gap: "18px", fontSize: "12px", color: "var(--muted-light)", marginTop: "6px" }}>
+        <span><span style={{ color: ME_COLOR }}>●</span> {myName}: {fmtMoneyShort(ra)}</span>
+        <span><span style={{ color: FRIEND_COLOR }}>●</span> {theirName}: {fmtMoneyShort(rb)}</span>
+        <span style={{ marginLeft: "auto" }}>kumulierter PnL pro Handelstag</span>
+      </div>
+    </div>
+  );
+}
+
+function FriendsMiniCalendar({ trades, year, month, name, color }) {
+  const { cells, total, count } = useMemo(() => {
+    const m = new Map();
+    trades.forEach((t) => {
+      if (!t.trade_date) return;
+      const e = m.get(t.trade_date) || { pnl: 0, n: 0 };
+      e.pnl += Number(t.pnl || 0);
+      e.n += 1;
+      m.set(t.trade_date, e);
+    });
+    const offset = mondayIndex(new Date(year, month, 1));
+    const dim = daysInMonth(year, month);
+    const arr = [];
+    for (let i = 0; i < offset; i++) arr.push(null);
+    let tot = 0, cnt = 0;
+    for (let d = 1; d <= dim; d++) {
+      const iso = isoDate(year, month, d);
+      const e = m.get(iso);
+      if (e) { tot += e.pnl; cnt += e.n; }
+      arr.push({ day: d, e });
+    }
+    return { cells: arr, total: tot, count: cnt };
+  }, [trades, year, month]);
+
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+        <span style={{ color, fontWeight: 700, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>{name}</span>
+        <span style={{ fontSize: "12px", color: total >= 0 ? "#fff" : "var(--red)" }}>
+          {fmtMoneyShort(total)} · {count} Trade{count === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "4px" }}>
+        {WEEKDAYS.map((d) => (
+          <div key={d} style={{ fontSize: "10px", color: "var(--muted)", textAlign: "center" }}>{d}</div>
+        ))}
+        {cells.map((c, i) => {
+          if (!c) return <div key={i} />;
+          const pnl = c.e ? c.e.pnl : null;
+          const bg = pnl === null ? "transparent" : pnl > 0 ? "rgba(255,255,255,0.10)" : pnl < 0 ? "rgba(224,0,26,0.16)" : "rgba(255,255,255,0.04)";
+          return (
+            <div
+              key={i}
+              style={{
+                background: bg, border: "1px solid var(--line)", borderRadius: "4px",
+                minHeight: "46px", padding: "4px 5px", display: "flex", flexDirection: "column",
+                justifyContent: "space-between", fontSize: "10px", color: "var(--muted-light)",
+              }}
+              title={c.e ? `${c.e.n} Trade(s)` : ""}
+            >
+              <span>{c.day}</span>
+              {pnl !== null && (
+                <span style={{ fontSize: "11px", fontWeight: 700, color: pnl >= 0 ? "#fff" : "var(--red)" }}>
+                  {fmtMoneyShort(pnl)}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FriendsPanel({ onClose, myTrades }) {
+  const [friends, setFriends] = useState(loadFriendsLS);
+  const [activeId, setActiveId] = useState(() => { const l = loadFriendsLS(); return l[0] ? l[0].id : null; });
+  const [adding, setAdding] = useState(() => loadFriendsLS().length === 0);
+  const [form, setForm] = useState({ name: "", url: "", key: "" });
+  const [formErr, setFormErr] = useState(null);
+  const [theirTrades, setTheirTrades] = useState([]);
+  const [fLoading, setFLoading] = useState(false);
+  const [fErr, setFErr] = useState(null);
+  const [period, setPeriod] = useState("all");
+  const [cur, setCur] = useState(() => { const n = new Date(); return { year: n.getFullYear(), month: n.getMonth() }; });
+
+  const active = friends.find((f) => f.id === activeId) || null;
+
+  // Nur GET — es wird nie etwas in die Datenbank des Freundes geschrieben.
+  useEffect(() => {
+    if (!active) { setTheirTrades([]); return; }
+    let cancelled = false;
+    setFLoading(true);
+    setFErr(null);
+    fetch(`${active.url}/rest/v1/Trades?select=*&order=trade_date.asc`, {
+      method: "GET",
+      headers: { apikey: active.key, Authorization: `Bearer ${active.key}` },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Fehler ${res.status} — URL, Key oder Lese-Policy (RLS) prüfen`);
+        return res.json();
+      })
+      .then((data) => { if (!cancelled) setTheirTrades(Array.isArray(data) ? data : []); })
+      .catch((e) => { if (!cancelled) { setTheirTrades([]); setFErr(e.message || "Verbindung fehlgeschlagen"); } })
+      .finally(() => { if (!cancelled) setFLoading(false); });
+    return () => { cancelled = true; };
+  }, [active ? active.id : null]);
+
+  const addFriend = () => {
+    const name = form.name.trim();
+    const url = normalizeSupabaseUrl(form.url);
+    const key = form.key.trim();
+    if (!name || !url || !key) { setFormErr("Name, Supabase-URL und anon Key ausfüllen."); return; }
+    if (!/^https:\/\/[^\s/]+$/i.test(url)) { setFormErr("URL muss so aussehen: https://xxxx.supabase.co"); return; }
+    if (url === SUPABASE_URL) { setFormErr("Das ist deine eigene Datenbank."); return; }
+    const f = { id: Math.random().toString(36).slice(2), name, url, key };
+    const next = [...friends, f];
+    setFriends(next);
+    saveFriendsLS(next);
+    setActiveId(f.id);
+    setForm({ name: "", url: "", key: "" });
+    setFormErr(null);
+    setAdding(false);
+  };
+
+  const removeFriend = (f) => {
+    if (!window.confirm(`${f.name} aus der Freundesliste entfernen? (Die Datenbank selbst bleibt unberührt.)`)) return;
+    const next = friends.filter((x) => x.id !== f.id);
+    setFriends(next);
+    saveFriendsLS(next);
+    if (activeId === f.id) setActiveId(next[0] ? next[0].id : null);
+    if (next.length === 0) setAdding(true);
+  };
+
+  const inPeriod = useCallback((t) => {
+    if (!t.trade_date) return false;
+    if (period === "cutoff") return t.trade_date >= STATS_CUTOFF_DATE;
+    if (period === "month") return t.trade_date.startsWith(`${cur.year}-${String(cur.month + 1).padStart(2, "0")}`);
+    return true;
+  }, [period, cur]);
+
+  const myFiltered = useMemo(() => myTrades.filter(inPeriod), [myTrades, inPeriod]);
+  const theirFiltered = useMemo(() => theirTrades.filter(inPeriod), [theirTrades, inPeriod]);
+  const mySum = useMemo(() => summarizeTrades(myFiltered), [myFiltered]);
+  const theirSum = useMemo(() => summarizeTrades(theirFiltered), [theirFiltered]);
+
+  const shiftMonth = (delta) => {
+    setCur((c) => {
+      const d = new Date(c.year, c.month + delta, 1);
+      return { year: d.getFullYear(), month: d.getMonth() };
+    });
+  };
+
+  const fmtPF = (v) => (v === Infinity ? "∞" : v.toFixed(2));
+  const rows = [
+    { label: "Trades", a: mySum.count, b: theirSum.count, fmt: (v) => String(v), better: null },
+    { label: "Netto PnL", a: mySum.pnl, b: theirSum.pnl, fmt: fmtMoneyShort, better: "high" },
+    { label: "Winrate", a: mySum.winrate, b: theirSum.winrate, fmt: (v) => `${v.toFixed(0)}%`, better: "high" },
+    { label: "Profit Factor", a: mySum.profitFactor, b: theirSum.profitFactor, fmt: fmtPF, better: "high" },
+    { label: "Ø RR (realisiert)", a: mySum.avgRR, b: theirSum.avgRR, fmt: (v) => `${v.toFixed(2)}R`, better: "high" },
+    { label: "Expectancy / Trade", a: mySum.expectancy, b: theirSum.expectancy, fmt: fmtMoneyShort, better: "high" },
+    { label: "Handelstage", a: mySum.dayCount, b: theirSum.dayCount, fmt: (v) => String(v), better: null },
+    { label: "Grüne Tage", a: mySum.greenDayPct, b: theirSum.greenDayPct, fmt: (v) => `${v.toFixed(0)}%`, better: "high" },
+    { label: "Bester Tag", a: mySum.bestDay, b: theirSum.bestDay, fmt: fmtMoneyShort, better: "high" },
+    { label: "Schlechtester Tag", a: mySum.worstDay, b: theirSum.worstDay, fmt: fmtMoneyShort, better: "high" },
+    { label: "Max Drawdown (PnL)", a: mySum.maxDD, b: theirSum.maxDD, fmt: (v) => fmtMoney(-v), better: "low" },
+  ];
+
+  const inputStyle = {
+    background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "6px", color: "var(--text)",
+    padding: "10px 12px", fontSize: "13px", fontFamily: "'JetBrains Mono', monospace", width: "100%",
+  };
+  const monthLabel = `${MONTHS[cur.month]} ${cur.year}`;
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="panel" style={{ width: "1120px" }} onClick={(e) => e.stopPropagation()}>
+        <div className="panel-head">
+          <span>Freunde — Vergleich</span>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Schließen">
+            <Icon.Close />
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+          {friends.map((f) => (
+            <button
+              key={f.id}
+              className={`btn-secondary ${f.id === activeId && !adding ? "active" : ""}`}
+              style={{ padding: "8px 14px" }}
+              onClick={() => { setActiveId(f.id); setAdding(false); }}
+            >
+              {f.name}
+            </button>
+          ))}
+          <button className="btn-secondary" style={{ padding: "8px 14px" }} onClick={() => setAdding((v) => !v)}>
+            <Icon.Plus /> Freund hinzufügen
+          </button>
+          {active && !active.builtIn && !adding && (
+            <button className="btn-secondary" style={{ padding: "8px 14px", marginLeft: "auto" }} onClick={() => removeFriend(active)}>
+              Entfernen
+            </button>
+          )}
+        </div>
+
+        {adding && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div className="notice">
+              Dein Freund schickt dir seine <b>Supabase Project URL</b> und seinen <b>anon / publishable Key</b> (Supabase → Project Settings → API). Beides wird nur in deinem Browser gespeichert. Es wird ausschließlich gelesen, nie geschrieben. Wichtig: Seine Tabelle <b>Trades</b> muss per RLS-Policy für Lesezugriff mit dem anon Key freigegeben sein (bei euch läuft das vermutlich schon, weil das Journal sonst nicht funktionieren würde).
+            </div>
+            <input style={inputStyle} placeholder="Name (z. B. Max)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <input style={inputStyle} placeholder="https://xxxx.supabase.co" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+            <input style={inputStyle} placeholder="anon / publishable Key" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} />
+            {formErr && <div className="notice notice-error">{formErr}</div>}
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button className="btn-primary" onClick={addFriend}>Speichern & laden</button>
+              {friends.length > 0 && <button className="btn-secondary" onClick={() => { setAdding(false); setFormErr(null); }}>Abbrechen</button>}
+            </div>
+          </div>
+        )}
+
+        {!adding && active && (
+          <React.Fragment>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+              {[
+                { id: "all", label: "Gesamt" },
+                { id: "cutoff", label: `Seit ${STATS_CUTOFF_DATE}` },
+                { id: "month", label: "Gewählter Monat" },
+              ].map((p) => (
+                <button key={p.id} className={`btn-secondary ${period === p.id ? "active" : ""}`} style={{ padding: "8px 14px" }} onClick={() => setPeriod(p.id)}>
+                  {p.label}
+                </button>
+              ))}
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
+                <button className="icon-btn" onClick={() => shiftMonth(-1)} aria-label="Vorheriger Monat"><Icon.ChevL /></button>
+                <span style={{ fontSize: "13px", minWidth: "130px", textAlign: "center" }}>{monthLabel}</span>
+                <button className="icon-btn" onClick={() => shiftMonth(1)} aria-label="Nächster Monat"><Icon.ChevR /></button>
+              </div>
+            </div>
+
+            {fLoading && <div className="notice">Lade Trades von {active.name}…</div>}
+            {fErr && <div className="notice notice-error">{fErr}</div>}
+            {!fLoading && !fErr && theirTrades.length === 0 && (
+              <div className="notice">Keine Trades gefunden. Entweder hat {active.name} noch keine, oder die RLS-Policy blockiert den Lesezugriff (Supabase liefert dann einfach eine leere Liste).</div>
+            )}
+
+            {!fLoading && !fErr && (
+              <React.Fragment>
+                <div>
+                  <div className="ft-section-title">Equity-Vergleich</div>
+                  <FriendsEquityChart mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} />
+                </div>
+
+                <div>
+                  <div className="ft-section-title">Statistiken</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: "1px", background: "var(--line)", border: "1px solid var(--line)", borderRadius: "6px", overflow: "hidden", fontSize: "13px" }}>
+                    <div style={{ background: "var(--panel-2)", padding: "8px 12px" }} />
+                    <div style={{ background: "var(--panel-2)", padding: "8px 12px", color: ME_COLOR, fontWeight: 700 }}>Ich</div>
+                    <div style={{ background: "var(--panel-2)", padding: "8px 12px", color: FRIEND_COLOR, fontWeight: 700 }}>{active.name}</div>
+                    {rows.map((r) => {
+                      const aBetter = r.better === "high" ? r.a > r.b : r.better === "low" ? r.a < r.b : false;
+                      const bBetter = r.better === "high" ? r.b > r.a : r.better === "low" ? r.b < r.a : false;
+                      return (
+                        <React.Fragment key={r.label}>
+                          <div style={{ background: "var(--panel)", padding: "8px 12px", color: "var(--muted-light)" }}>{r.label}</div>
+                          <div style={{ background: "var(--panel)", padding: "8px 12px", fontWeight: aBetter ? 700 : 400, color: aBetter ? "#fff" : "var(--muted-light)" }}>{r.fmt(r.a)}{aBetter ? " ▲" : ""}</div>
+                          <div style={{ background: "var(--panel)", padding: "8px 12px", fontWeight: bBetter ? 700 : 400, color: bBetter ? "#fff" : "var(--muted-light)" }}>{r.fmt(r.b)}{bBetter ? " ▲" : ""}</div>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="ft-section-title">Kalender — {monthLabel}</div>
+                  <div style={{ display: "flex", gap: "24px", flexWrap: "wrap" }}>
+                    <FriendsMiniCalendar trades={myTrades} year={cur.year} month={cur.month} name="Ich" color={ME_COLOR} />
+                    <FriendsMiniCalendar trades={theirTrades} year={cur.year} month={cur.month} name={active.name} color={FRIEND_COLOR} />
+                  </div>
+                </div>
+              </React.Fragment>
+            )}
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<TradingJournal />);
+root.render(ACTIVE_PROFILE ? <TradingJournal /> : <ProfilePicker />);
 </script>
 
 </body>
