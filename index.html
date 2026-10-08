@@ -3027,49 +3027,249 @@ function summarizeTrades(list) {
   };
 }
 
-function FriendsEquityChart({ mine, theirs, myName, theirName }) {
-  const W = 640, H = 170, P = 10;
-  const sumByDate = (list) => {
-    const m = new Map();
-    list.forEach((t) => m.set(t.trade_date, (m.get(t.trade_date) || 0) + Number(t.pnl || 0)));
-    return m;
-  };
-  const a = sumByDate(mine), b = sumByDate(theirs);
-  const dates = Array.from(new Set([...a.keys(), ...b.keys()])).sort();
-  if (dates.length === 0) return <div className="notice">Keine Trades im gewählten Zeitraum.</div>;
+const fmtPFValue = (v) => (v === Infinity ? "∞" : v.toFixed(2));
+const friendsCard = { background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "10px", padding: "18px 20px" };
+const friendsSectionTitle = { fontSize: "11px", color: "var(--muted-light)", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: "14px", fontWeight: 700 };
+const friendsSeg = (active) => ({
+  background: active ? "rgba(255,255,255,0.10)" : "transparent",
+  border: `1px solid ${active ? "var(--muted-light)" : "var(--line)"}`,
+  color: active ? "#fff" : "var(--muted-light)",
+  borderRadius: "6px", padding: "7px 14px", fontSize: "12px", fontWeight: 700,
+  letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer",
+  fontFamily: "'JetBrains Mono', monospace",
+});
+const friendsDayLabel = (iso) => {
+  const d = new Date(`${iso}T00:00:00`);
+  if (isNaN(d.getTime())) return iso;
+  return `${WEEKDAY_FULL[mondayIndex(d)]}, ${iso}`;
+};
 
-  let ra = 0, rb = 0;
-  const pa = [], pb = [];
-  dates.forEach((d) => {
-    ra += a.get(d) || 0;
-    rb += b.get(d) || 0;
-    pa.push(ra);
-    pb.push(rb);
-  });
-  const all = [0, ...pa, ...pb];
-  const min = Math.min(...all), max = Math.max(...all);
-  const span = max - min || 1;
-  const x = (i) => (dates.length === 1 ? W / 2 : P + (i / (dates.length - 1)) * (W - 2 * P));
-  const y = (v) => H - P - ((v - min) / span) * (H - 2 * P);
-  const path = (arr) => arr.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-
+function FriendAvatar({ name, color, size = 34 }) {
   return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
-        <line x1={P} x2={W - P} y1={y(0)} y2={y(0)} stroke="#333" strokeDasharray="4 4" />
-        <path d={path(pa)} fill="none" stroke={ME_COLOR} strokeWidth="2" />
-        <path d={path(pb)} fill="none" stroke={FRIEND_COLOR} strokeWidth="2" />
-      </svg>
-      <div style={{ display: "flex", gap: "18px", fontSize: "12px", color: "var(--muted-light)", marginTop: "6px" }}>
-        <span><span style={{ color: ME_COLOR }}>●</span> {myName}: {fmtMoneyShort(ra)}</span>
-        <span><span style={{ color: FRIEND_COLOR }}>●</span> {theirName}: {fmtMoneyShort(rb)}</span>
-        <span style={{ marginLeft: "auto" }}>kumulierter PnL pro Handelstag</span>
+    <span style={{
+      width: size, height: size, borderRadius: "50%", border: `2px solid ${color}`, color,
+      display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700,
+      fontSize: Math.round(size * 0.42), background: "rgba(255,255,255,0.03)", flexShrink: 0,
+    }}>
+      {(name || "?").trim().charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+function ResultPill({ result }) {
+  const map = {
+    win: ["WIN", "#fff", "rgba(255,255,255,0.12)"],
+    loss: ["LOSS", "#ff6b78", "rgba(224,0,26,0.16)"],
+    be: ["BE", "var(--muted-light)", "rgba(255,255,255,0.06)"],
+  };
+  const m = map[result];
+  if (!m) return null;
+  return (
+    <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.1em", padding: "3px 8px", borderRadius: "999px", color: m[1], background: m[2] }}>
+      {m[0]}
+    </span>
+  );
+}
+
+function FriendsHeroCard({ name, color, sum, leading }) {
+  return (
+    <div style={{ ...friendsCard, flex: 1, minWidth: "260px", borderTop: `3px solid ${color}`, display: "flex", flexDirection: "column", gap: "10px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <FriendAvatar name={name} color={color} />
+        <span style={{ fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: "13px" }}>{name}</span>
+        {leading && (
+          <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, letterSpacing: "0.1em", color, border: `1px solid ${color}`, borderRadius: "999px", padding: "3px 9px" }}>▲ FÜHRT</span>
+        )}
+      </div>
+      <div style={{ fontSize: "32px", fontWeight: 700, color: sum.pnl >= 0 ? "#fff" : "var(--red)" }}>{fmtMoneyShort(sum.pnl)}</div>
+      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "12px", color: "var(--muted-light)" }}>
+        <span>{sum.count} Trades</span>
+        <span>WR {sum.winrate.toFixed(0)}%</span>
+        <span>PF {fmtPFValue(sum.profitFactor)}</span>
+        <span>Ø {sum.avgRR.toFixed(2)}R</span>
       </div>
     </div>
   );
 }
 
-function FriendsMiniCalendar({ trades, year, month, name, color }) {
+// Schreibgeschuetzte Trade-Karte: zeigt alles, was auch im eigenen Journal sichtbar ist
+// (Richtung, Symbol, SL/TP/RR, Setup, Confluences, Notiz, Screenshot) — ohne Bearbeiten/Loeschen.
+function FriendsTradeCard({ trade, onShot }) {
+  const pnl = Number(trade.pnl || 0);
+  const tags = Array.isArray(trade.confluences) ? trade.confluences : [];
+  const rr = trade.rr !== null && trade.rr !== undefined && trade.rr !== "" ? Number(trade.rr).toFixed(2) : "—";
+  return (
+    <div style={{
+      background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "8px", padding: "12px 14px",
+      borderLeft: `3px solid ${pnl > 0 ? "#fff" : pnl < 0 ? "var(--red)" : "var(--muted)"}`,
+      display: "flex", flexDirection: "column", gap: "8px",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <span className={`dir-tag ${trade.direction === "long" ? "dir-long" : "dir-short"}`}>
+          {trade.direction === "long" ? "Long" : "Short"}
+        </span>
+        <span style={{ fontWeight: 700, fontSize: "13px" }}>
+          {trade.symbol ?? ""}{trade.contracts ? ` x${trade.contracts}` : ""}
+        </span>
+        <ResultPill result={trade.result} />
+        <span style={{ marginLeft: "auto", fontWeight: 700, fontSize: "15px", color: pnl >= 0 ? "#fff" : "var(--red)" }}>
+          {fmtMoneyShort(pnl)}
+        </span>
+      </div>
+      <div style={{ fontSize: "12px", color: "var(--muted-light)" }}>
+        SL {trade.stop_loss ?? "—"} · TP {trade.take_profit ?? "—"} · RR {rr}{trade.setup ? ` · ${trade.setup}` : ""}
+      </div>
+      {tags.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+          {tags.map((c) => (
+            <span key={c} className="confluence-chip-sm">{c}</span>
+          ))}
+        </div>
+      )}
+      {trade.note && (
+        <div style={{ fontSize: "12px", color: "var(--muted-light)", lineHeight: 1.6, whiteSpace: "pre-wrap", borderTop: "1px dashed var(--line)", paddingTop: "8px" }}>
+          {trade.note}
+        </div>
+      )}
+      {trade.screenshot && (
+        <div>
+          <button type="button" className="trade-shot-btn" onClick={() => onShot(trade.screenshot)}>
+            <Icon.Image /> Screenshot ansehen
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Liste aller Trades einer Person, nach Tagen gruppiert (neueste zuerst).
+function FriendsTradeColumn({ name, color, trades, onShot }) {
+  const [visibleDays, setVisibleDays] = useState(14);
+  const groups = useMemo(() => {
+    const sorted = [...trades].sort((a, b) =>
+      a.trade_date < b.trade_date ? 1 : a.trade_date > b.trade_date ? -1 : Number(b.id || 0) - Number(a.id || 0)
+    );
+    const m = new Map();
+    sorted.forEach((t) => {
+      if (!m.has(t.trade_date)) m.set(t.trade_date, []);
+      m.get(t.trade_date).push(t);
+    });
+    return Array.from(m.entries());
+  }, [trades]);
+
+  return (
+    <div style={{ flex: 1, minWidth: "320px", display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", borderBottom: `2px solid ${color}`, paddingBottom: "10px" }}>
+        <FriendAvatar name={name} color={color} size={28} />
+        <span style={{ fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", fontSize: "13px" }}>{name}</span>
+        <span style={{ marginLeft: "auto", fontSize: "12px", color: "var(--muted-light)" }}>{trades.length} Trade{trades.length === 1 ? "" : "s"}</span>
+      </div>
+      {groups.length === 0 && <div className="notice">Keine Trades für diese Auswahl.</div>}
+      {groups.slice(0, visibleDays).map(([date, list]) => {
+        const dayPnl = list.reduce((s, t) => s + Number(t.pnl || 0), 0);
+        return (
+          <div key={date} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "var(--muted-light)" }}>
+              <span>{friendsDayLabel(date)}</span>
+              <span style={{ fontWeight: 700, color: dayPnl >= 0 ? "#fff" : "var(--red)" }}>{fmtMoneyShort(dayPnl)}</span>
+            </div>
+            {list.map((t) => (
+              <FriendsTradeCard key={t.id ?? `${date}-${Math.random()}`} trade={t} onShot={onShot} />
+            ))}
+          </div>
+        );
+      })}
+      {groups.length > visibleDays && (
+        <button type="button" className="btn-secondary" style={{ justifyContent: "center" }} onClick={() => setVisibleDays((v) => v + 14)}>
+          Mehr anzeigen ({groups.length - visibleDays} weitere Tage)
+        </button>
+      )}
+    </div>
+  );
+}
+
+function FriendsEquityChart({ mine, theirs, myName, theirName }) {
+  const [hover, setHover] = useState(null);
+  const W = 760, H = 230, PL = 64, PR = 16, PT = 14, PB = 28;
+  const { dates, pa, pb } = useMemo(() => {
+    const sum = (list) => {
+      const m = new Map();
+      list.forEach((t) => m.set(t.trade_date, (m.get(t.trade_date) || 0) + Number(t.pnl || 0)));
+      return m;
+    };
+    const a = sum(mine), b = sum(theirs);
+    const ds = Array.from(new Set([...a.keys(), ...b.keys()])).sort();
+    let ra = 0, rb = 0;
+    const A = [], B = [];
+    ds.forEach((d) => { ra += a.get(d) || 0; rb += b.get(d) || 0; A.push(ra); B.push(rb); });
+    return { dates: ds, pa: A, pb: B };
+  }, [mine, theirs]);
+
+  if (dates.length === 0) return <div className="notice">Keine Trades im gewählten Zeitraum.</div>;
+
+  const all = [0, ...pa, ...pb];
+  let min = Math.min(...all), max = Math.max(...all);
+  if (max === min) { max += 1; min -= 1; }
+  const pad = (max - min) * 0.08;
+  min -= pad; max += pad;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const n = dates.length;
+  const x = (i) => (n === 1 ? PL + iw / 2 : PL + (i / (n - 1)) * iw);
+  const y = (v) => PT + (1 - (v - min) / (max - min)) * ih;
+  const line = (arr) => arr.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const area = (arr) => `${line(arr)} L${x(n - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
+  const ticks = [0, 1, 2, 3, 4].map((k) => min + ((max - min) * k) / 4);
+  const money = (v) => `${v < 0 ? "-" : ""}$${Math.abs(Math.round(v)).toLocaleString("de-DE")}`;
+
+  const onMove = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * W;
+    const i = n === 1 ? 0 : Math.round(((px - PL) / iw) * (n - 1));
+    setHover(Math.max(0, Math.min(n - 1, i)));
+  };
+  const hi = hover !== null && hover < n ? hover : n - 1;
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: "22px", flexWrap: "wrap", fontSize: "12px", color: "var(--muted-light)", marginBottom: "10px" }}>
+        <span style={{ color: "#fff", fontWeight: 700 }}>{friendsDayLabel(dates[hi])}</span>
+        <span><span style={{ color: ME_COLOR }}>●</span> {myName}: <b style={{ color: "#fff" }}>{fmtMoneyShort(pa[hi])}</b></span>
+        <span><span style={{ color: FRIEND_COLOR }}>●</span> {theirName}: <b style={{ color: "#fff" }}>{fmtMoneyShort(pb[hi])}</b></span>
+        <span style={{ marginLeft: "auto" }}>kumulierter PnL pro Handelstag</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", cursor: "crosshair" }} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+        <defs>
+          <linearGradient id="fgMe" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={ME_COLOR} stopOpacity="0.16" />
+            <stop offset="100%" stopColor={ME_COLOR} stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="fgThem" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={FRIEND_COLOR} stopOpacity="0.18" />
+            <stop offset="100%" stopColor={FRIEND_COLOR} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {ticks.map((t, k) => (
+          <g key={k}>
+            <line x1={PL} x2={W - PR} y1={y(t)} y2={y(t)} stroke="#1c1c1c" />
+            <text x={PL - 8} y={y(t) + 4} textAnchor="end" fontSize="10" fill="#666">{money(t)}</text>
+          </g>
+        ))}
+        <line x1={PL} x2={W - PR} y1={y(0)} y2={y(0)} stroke="#444" strokeDasharray="4 4" />
+        {n > 1 && <path d={area(pa)} fill="url(#fgMe)" />}
+        {n > 1 && <path d={area(pb)} fill="url(#fgThem)" />}
+        <path d={line(pa)} fill="none" stroke={ME_COLOR} strokeWidth="2.2" strokeLinejoin="round" />
+        <path d={line(pb)} fill="none" stroke={FRIEND_COLOR} strokeWidth="2.2" strokeLinejoin="round" />
+        <text x={PL} y={H - 8} fontSize="10" fill="#666">{dates[0]}</text>
+        <text x={W - PR} y={H - 8} textAnchor="end" fontSize="10" fill="#666">{dates[n - 1]}</text>
+        {hover !== null && <line x1={x(hi)} x2={x(hi)} y1={PT} y2={PT + ih} stroke="#555" />}
+        <circle cx={x(hi)} cy={y(pa[hi])} r="4.5" fill={ME_COLOR} stroke="#000" strokeWidth="1.5" />
+        <circle cx={x(hi)} cy={y(pb[hi])} r="4.5" fill={FRIEND_COLOR} stroke="#000" strokeWidth="1.5" />
+      </svg>
+    </div>
+  );
+}
+
+function FriendsMiniCalendar({ trades, year, month, name, color, selectedDay, onSelect }) {
   const { cells, total, count } = useMemo(() => {
     const m = new Map();
     trades.forEach((t) => {
@@ -3088,44 +3288,51 @@ function FriendsMiniCalendar({ trades, year, month, name, color }) {
       const iso = isoDate(year, month, d);
       const e = m.get(iso);
       if (e) { tot += e.pnl; cnt += e.n; }
-      arr.push({ day: d, e });
+      arr.push({ day: d, iso, e });
     }
     return { cells: arr, total: tot, count: cnt };
   }, [trades, year, month]);
 
   return (
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
-        <span style={{ color, fontWeight: 700, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>{name}</span>
-        <span style={{ fontSize: "12px", color: total >= 0 ? "#fff" : "var(--red)" }}>
-          {fmtMoneyShort(total)} · {count} Trade{count === 1 ? "" : "s"}
+    <div style={{ ...friendsCard, flex: 1, minWidth: "340px", borderTop: `3px solid ${color}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
+        <FriendAvatar name={name} color={color} size={28} />
+        <span style={{ fontWeight: 700, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{name}</span>
+        <span style={{ marginLeft: "auto", fontSize: "12px", color: "var(--muted-light)" }}>
+          <b style={{ color: total >= 0 ? "#fff" : "var(--red)" }}>{fmtMoneyShort(total)}</b> · {count} Trade{count === 1 ? "" : "s"}
         </span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "4px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "5px" }}>
         {WEEKDAYS.map((d) => (
-          <div key={d} style={{ fontSize: "10px", color: "var(--muted)", textAlign: "center" }}>{d}</div>
+          <div key={d} style={{ fontSize: "10px", color: "var(--muted)", textAlign: "center", letterSpacing: "0.1em", paddingBottom: "2px" }}>{d}</div>
         ))}
         {cells.map((c, i) => {
           if (!c) return <div key={i} />;
           const pnl = c.e ? c.e.pnl : null;
-          const bg = pnl === null ? "transparent" : pnl > 0 ? "rgba(255,255,255,0.10)" : pnl < 0 ? "rgba(224,0,26,0.16)" : "rgba(255,255,255,0.04)";
+          const selected = selectedDay === c.iso;
+          const bg = pnl === null ? "transparent" : pnl > 0 ? "rgba(255,255,255,0.10)" : pnl < 0 ? "rgba(224,0,26,0.18)" : "rgba(255,255,255,0.05)";
           return (
-            <div
+            <button
+              type="button"
               key={i}
+              disabled={!c.e}
+              onClick={() => onSelect(selected ? null : c.iso)}
               style={{
-                background: bg, border: "1px solid var(--line)", borderRadius: "4px",
-                minHeight: "46px", padding: "4px 5px", display: "flex", flexDirection: "column",
+                background: bg, border: `1px solid ${selected ? color : "var(--line)"}`, borderRadius: "6px",
+                minHeight: "62px", padding: "6px 7px", display: "flex", flexDirection: "column", textAlign: "left",
                 justifyContent: "space-between", fontSize: "10px", color: "var(--muted-light)",
+                cursor: c.e ? "pointer" : "default", opacity: i % 7 >= 5 && !c.e ? 0.4 : 1,
+                fontFamily: "'JetBrains Mono', monospace", boxShadow: selected ? `0 0 0 1px ${color}` : "none",
               }}
-              title={c.e ? `${c.e.n} Trade(s)` : ""}
             >
               <span>{c.day}</span>
-              {pnl !== null && (
-                <span style={{ fontSize: "11px", fontWeight: 700, color: pnl >= 0 ? "#fff" : "var(--red)" }}>
-                  {fmtMoneyShort(pnl)}
+              {c.e && (
+                <span style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: 700, color: pnl >= 0 ? "#fff" : "var(--red)" }}>{fmtMoneyShort(pnl)}</span>
+                  <span style={{ fontSize: "9px" }}>{c.e.n} Trade{c.e.n === 1 ? "" : "s"}</span>
                 </span>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
@@ -3144,6 +3351,11 @@ function FriendsPanel({ onClose, myTrades }) {
   const [fErr, setFErr] = useState(null);
   const [period, setPeriod] = useState("all");
   const [cur, setCur] = useState(() => { const n = new Date(); return { year: n.getFullYear(), month: n.getMonth() }; });
+  const [tab, setTab] = useState("overview");
+  const [who, setWho] = useState("both");
+  const [resFilter, setResFilter] = useState("all");
+  const [selDay, setSelDay] = useState(null);
+  const [shot, setShot] = useState(null);
 
   const active = friends.find((f) => f.id === activeId) || null;
 
@@ -3212,7 +3424,7 @@ function FriendsPanel({ onClose, myTrades }) {
     });
   };
 
-  const fmtPF = (v) => (v === Infinity ? "∞" : v.toFixed(2));
+  const fmtPF = fmtPFValue;
   const rows = [
     { label: "Trades", a: mySum.count, b: theirSum.count, fmt: (v) => String(v), better: null },
     { label: "Netto PnL", a: mySum.pnl, b: theirSum.pnl, fmt: fmtMoneyShort, better: "high" },
@@ -3233,118 +3445,246 @@ function FriendsPanel({ onClose, myTrades }) {
   };
   const monthLabel = `${MONTHS[cur.month]} ${cur.year}`;
 
+  // Trades-Tab: zusaetzlich nach Ergebnis filtern; Kalender-Tab: Details des gewaehlten Tages.
+  const myList = useMemo(() => myFiltered.filter((t) => resFilter === "all" || t.result === resFilter), [myFiltered, resFilter]);
+  const theirList = useMemo(() => theirFiltered.filter((t) => resFilter === "all" || t.result === resFilter), [theirFiltered, resFilter]);
+  const myDay = selDay ? myTrades.filter((t) => t.trade_date === selDay) : [];
+  const theirDay = selDay ? theirTrades.filter((t) => t.trade_date === selDay) : [];
+  const diff = mySum.pnl - theirSum.pnl;
+
+  const monthNav = (
+    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+      <button type="button" className="icon-btn" onClick={() => shiftMonth(-1)} aria-label="Vorheriger Monat"><Icon.ChevL /></button>
+      <span style={{ fontSize: "13px", minWidth: "140px", textAlign: "center", fontWeight: 700 }}>{monthLabel}</span>
+      <button type="button" className="icon-btn" onClick={() => shiftMonth(1)} aria-label="Nächster Monat"><Icon.ChevR /></button>
+    </div>
+  );
+
+  const pillStyle = (sel) => ({
+    display: "flex", alignItems: "center", gap: "8px",
+    background: sel ? "rgba(77,163,255,0.10)" : "transparent",
+    border: `1px solid ${sel ? FRIEND_COLOR : "var(--line)"}`,
+    color: sel ? "#fff" : "var(--muted-light)",
+    borderRadius: "999px", padding: "6px 16px 6px 6px", cursor: "pointer",
+    fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", fontWeight: 700,
+  });
+
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="panel" style={{ width: "1120px" }} onClick={(e) => e.stopPropagation()}>
-        <div className="panel-head">
-          <span>Freunde — Vergleich</span>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Schließen">
-            <Icon.Close />
-          </button>
-        </div>
-
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-          {friends.map((f) => (
-            <button
-              key={f.id}
-              className={`btn-secondary ${f.id === activeId && !adding ? "active" : ""}`}
-              style={{ padding: "8px 14px" }}
-              onClick={() => { setActiveId(f.id); setAdding(false); }}
-            >
-              {f.name}
+    <React.Fragment>
+      <div className="overlay" onClick={onClose}>
+        <div className="panel" style={{ width: "1240px", maxHeight: "92vh" }} onClick={(e) => e.stopPropagation()}>
+          <div className="panel-head">
+            <span>Freunde — Vergleich</span>
+            <button type="button" className="icon-btn" onClick={onClose} aria-label="Schließen">
+              <Icon.Close />
             </button>
-          ))}
-          <button className="btn-secondary" style={{ padding: "8px 14px" }} onClick={() => setAdding((v) => !v)}>
-            <Icon.Plus /> Freund hinzufügen
-          </button>
-          {active && !active.builtIn && !adding && (
-            <button className="btn-secondary" style={{ padding: "8px 14px", marginLeft: "auto" }} onClick={() => removeFriend(active)}>
-              Entfernen
-            </button>
-          )}
-        </div>
-
-        {adding && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            <div className="notice">
-              Dein Freund schickt dir seine <b>Supabase Project URL</b> und seinen <b>anon / publishable Key</b> (Supabase → Project Settings → API). Beides wird nur in deinem Browser gespeichert. Es wird ausschließlich gelesen, nie geschrieben. Wichtig: Seine Tabelle <b>Trades</b> muss per RLS-Policy für Lesezugriff mit dem anon Key freigegeben sein (bei euch läuft das vermutlich schon, weil das Journal sonst nicht funktionieren würde).
-            </div>
-            <input style={inputStyle} placeholder="Name (z. B. Max)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            <input style={inputStyle} placeholder="https://xxxx.supabase.co" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
-            <input style={inputStyle} placeholder="anon / publishable Key" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} />
-            {formErr && <div className="notice notice-error">{formErr}</div>}
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button className="btn-primary" onClick={addFriend}>Speichern & laden</button>
-              {friends.length > 0 && <button className="btn-secondary" onClick={() => { setAdding(false); setFormErr(null); }}>Abbrechen</button>}
-            </div>
           </div>
-        )}
 
-        {!adding && active && (
-          <React.Fragment>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-              {[
-                { id: "all", label: "Gesamt" },
-                { id: "cutoff", label: `Seit ${STATS_CUTOFF_DATE}` },
-                { id: "month", label: "Gewählter Monat" },
-              ].map((p) => (
-                <button key={p.id} className={`btn-secondary ${period === p.id ? "active" : ""}`} style={{ padding: "8px 14px" }} onClick={() => setPeriod(p.id)}>
-                  {p.label}
-                </button>
-              ))}
-              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
-                <button className="icon-btn" onClick={() => shiftMonth(-1)} aria-label="Vorheriger Monat"><Icon.ChevL /></button>
-                <span style={{ fontSize: "13px", minWidth: "130px", textAlign: "center" }}>{monthLabel}</span>
-                <button className="icon-btn" onClick={() => shiftMonth(1)} aria-label="Nächster Monat"><Icon.ChevR /></button>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+            {friends.map((f) => (
+              <button key={f.id} type="button" style={pillStyle(f.id === activeId && !adding)} onClick={() => { setActiveId(f.id); setAdding(false); setSelDay(null); }}>
+                <FriendAvatar name={f.name} color={FRIEND_COLOR} size={24} /> {f.name}
+              </button>
+            ))}
+            <button type="button" style={{ ...pillStyle(adding), padding: "9px 16px" }} onClick={() => setAdding((v) => !v)}>
+              <Icon.Plus /> Freund hinzufügen
+            </button>
+            {active && !active.builtIn && !adding && (
+              <button type="button" className="btn-secondary" style={{ padding: "8px 14px", marginLeft: "auto" }} onClick={() => removeFriend(active)}>
+                Entfernen
+              </button>
+            )}
+          </div>
+
+          {adding && (
+            <div style={{ ...friendsCard, display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div className="notice">
+                Dein Freund schickt dir seine <b>Supabase Project URL</b> und seinen <b>anon / publishable Key</b> (Supabase → Project Settings → API). Beides wird nur in deinem Browser gespeichert. Es wird ausschließlich gelesen, nie geschrieben. Wichtig: Seine Tabelle <b>Trades</b> muss per RLS-Policy für Lesezugriff mit dem anon Key freigegeben sein.
+              </div>
+              <input style={inputStyle} placeholder="Name (z. B. Max)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <input style={inputStyle} placeholder="https://xxxx.supabase.co" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+              <input style={inputStyle} placeholder="anon / publishable Key" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} />
+              {formErr && <div className="notice notice-error">{formErr}</div>}
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button type="button" className="btn-primary" onClick={addFriend}>Speichern & laden</button>
+                {friends.length > 0 && <button type="button" className="btn-secondary" onClick={() => { setAdding(false); setFormErr(null); }}>Abbrechen</button>}
               </div>
             </div>
+          )}
 
-            {fLoading && <div className="notice">Lade Trades von {active.name}…</div>}
-            {fErr && <div className="notice notice-error">{fErr}</div>}
-            {!fLoading && !fErr && theirTrades.length === 0 && (
-              <div className="notice">Keine Trades gefunden. Entweder hat {active.name} noch keine, oder die RLS-Policy blockiert den Lesezugriff (Supabase liefert dann einfach eine leere Liste).</div>
-            )}
+          {!adding && active && (
+            <React.Fragment>
+              <div style={{ display: "flex", gap: "4px", borderBottom: "1px solid var(--line)", alignItems: "center" }}>
+                {[["overview", "Übersicht"], ["calendar", "Kalender"], ["trades", "Trades"]].map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setTab(id)}
+                    style={{
+                      background: "none", border: "none", marginBottom: "-1px",
+                      borderBottom: `2px solid ${tab === id ? "var(--red)" : "transparent"}`,
+                      color: tab === id ? "#fff" : "var(--muted-light)", padding: "10px 18px", fontSize: "12px",
+                      fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <div style={{ marginLeft: "auto" }}>{(tab === "calendar" || (tab !== "calendar" && period === "month")) && monthNav}</div>
+              </div>
 
-            {!fLoading && !fErr && (
-              <React.Fragment>
-                <div>
-                  <div className="ft-section-title">Equity-Vergleich</div>
-                  <FriendsEquityChart mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} />
+              {tab !== "calendar" && (
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                  {[
+                    { id: "all", label: "Gesamt" },
+                    { id: "cutoff", label: `Seit ${STATS_CUTOFF_DATE}` },
+                    { id: "month", label: "Gewählter Monat" },
+                  ].map((p) => (
+                    <button key={p.id} type="button" style={friendsSeg(period === p.id)} onClick={() => setPeriod(p.id)}>{p.label}</button>
+                  ))}
+                  {tab === "trades" && (
+                    <React.Fragment>
+                      <span style={{ width: "1px", height: "22px", background: "var(--line)", margin: "0 6px" }} />
+                      {[["both", "Beide"], ["me", "Ich"], ["them", active.name]].map(([id, label]) => (
+                        <button key={id} type="button" style={friendsSeg(who === id)} onClick={() => setWho(id)}>{label}</button>
+                      ))}
+                      <span style={{ width: "1px", height: "22px", background: "var(--line)", margin: "0 6px" }} />
+                      {[["all", "Alle"], ["win", "Win"], ["loss", "Loss"], ["be", "BE"]].map(([id, label]) => (
+                        <button key={id} type="button" style={friendsSeg(resFilter === id)} onClick={() => setResFilter(id)}>{label}</button>
+                      ))}
+                    </React.Fragment>
+                  )}
                 </div>
+              )}
 
-                <div>
-                  <div className="ft-section-title">Statistiken</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: "1px", background: "var(--line)", border: "1px solid var(--line)", borderRadius: "6px", overflow: "hidden", fontSize: "13px" }}>
-                    <div style={{ background: "var(--panel-2)", padding: "8px 12px" }} />
-                    <div style={{ background: "var(--panel-2)", padding: "8px 12px", color: ME_COLOR, fontWeight: 700 }}>Ich</div>
-                    <div style={{ background: "var(--panel-2)", padding: "8px 12px", color: FRIEND_COLOR, fontWeight: 700 }}>{active.name}</div>
+              {fLoading && <div className="notice">Lade Trades von {active.name}…</div>}
+              {fErr && <div className="notice notice-error">{fErr}</div>}
+              {!fLoading && !fErr && theirTrades.length === 0 && (
+                <div className="notice">Keine Trades gefunden. Entweder hat {active.name} noch keine, oder die RLS-Policy blockiert den Lesezugriff (Supabase liefert dann einfach eine leere Liste).</div>
+              )}
+
+              {!fLoading && !fErr && tab === "overview" && (
+                <React.Fragment>
+                  <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                    <FriendsHeroCard name="Ich" color={ME_COLOR} sum={mySum} leading={diff > 0} />
+                    <FriendsHeroCard name={active.name} color={FRIEND_COLOR} sum={theirSum} leading={diff < 0} />
+                  </div>
+                  {diff !== 0 && (
+                    <div style={{ textAlign: "center", fontSize: "12px", color: "var(--muted-light)" }}>
+                      {diff > 0 ? `Du liegst ` : `${active.name} liegt `}
+                      <b style={{ color: "#fff" }}>{fmtMoney(Math.abs(diff))}</b>
+                      {diff > 0 ? ` vor ${active.name}` : " vor dir"}
+                    </div>
+                  )}
+
+                  <div style={friendsCard}>
+                    <div style={friendsSectionTitle}>Equity-Vergleich</div>
+                    <FriendsEquityChart mine={myFiltered} theirs={theirFiltered} myName="Ich" theirName={active.name} />
+                  </div>
+
+                  <div style={friendsCard}>
+                    <div style={friendsSectionTitle}>Statistiken</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "190px 1fr 1fr", gap: "22px", paddingBottom: "8px", borderBottom: "1px solid var(--line)" }}>
+                      <span />
+                      <span style={{ color: ME_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Ich</span>
+                      <span style={{ color: FRIEND_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{active.name}</span>
+                    </div>
                     {rows.map((r) => {
+                      const finite = (v) => Number.isFinite(v);
+                      const mx = Math.max(1e-9, ...[r.a, r.b].filter(finite).map((v) => Math.abs(v)));
+                      const wd = (v) => (!finite(v) ? 100 : Math.min(100, (Math.abs(v) / mx) * 100));
                       const aBetter = r.better === "high" ? r.a > r.b : r.better === "low" ? r.a < r.b : false;
                       const bBetter = r.better === "high" ? r.b > r.a : r.better === "low" ? r.b < r.a : false;
+                      const cell = (v, better, color) => (
+                        <div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px", fontSize: "13px", fontWeight: better ? 700 : 400, color: better ? "#fff" : "var(--muted-light)" }}>
+                            <span>{r.fmt(v)}</span>
+                            {better && <span style={{ fontSize: "10px", color }}>▲</span>}
+                          </div>
+                          <div style={{ height: "5px", background: "#1a1a1a", borderRadius: "3px", overflow: "hidden" }}>
+                            <div style={{ width: `${wd(v)}%`, height: "100%", background: color, opacity: better ? 1 : 0.45, borderRadius: "3px" }} />
+                          </div>
+                        </div>
+                      );
                       return (
-                        <React.Fragment key={r.label}>
-                          <div style={{ background: "var(--panel)", padding: "8px 12px", color: "var(--muted-light)" }}>{r.label}</div>
-                          <div style={{ background: "var(--panel)", padding: "8px 12px", fontWeight: aBetter ? 700 : 400, color: aBetter ? "#fff" : "var(--muted-light)" }}>{r.fmt(r.a)}{aBetter ? " ▲" : ""}</div>
-                          <div style={{ background: "var(--panel)", padding: "8px 12px", fontWeight: bBetter ? 700 : 400, color: bBetter ? "#fff" : "var(--muted-light)" }}>{r.fmt(r.b)}{bBetter ? " ▲" : ""}</div>
-                        </React.Fragment>
+                        <div key={r.label} style={{ display: "grid", gridTemplateColumns: "190px 1fr 1fr", gap: "22px", alignItems: "center", padding: "11px 0", borderBottom: "1px solid var(--line)" }}>
+                          <span style={{ fontSize: "12px", color: "var(--muted-light)" }}>{r.label}</span>
+                          {cell(r.a, aBetter, ME_COLOR)}
+                          {cell(r.b, bBetter, FRIEND_COLOR)}
+                        </div>
                       );
                     })}
                   </div>
-                </div>
+                </React.Fragment>
+              )}
 
-                <div>
-                  <div className="ft-section-title">Kalender — {monthLabel}</div>
-                  <div style={{ display: "flex", gap: "24px", flexWrap: "wrap" }}>
-                    <FriendsMiniCalendar trades={myTrades} year={cur.year} month={cur.month} name="Ich" color={ME_COLOR} />
-                    <FriendsMiniCalendar trades={theirTrades} year={cur.year} month={cur.month} name={active.name} color={FRIEND_COLOR} />
+              {!fLoading && !fErr && tab === "calendar" && (
+                <React.Fragment>
+                  <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                    <FriendsMiniCalendar trades={myTrades} year={cur.year} month={cur.month} name="Ich" color={ME_COLOR} selectedDay={selDay} onSelect={setSelDay} />
+                    <FriendsMiniCalendar trades={theirTrades} year={cur.year} month={cur.month} name={active.name} color={FRIEND_COLOR} selectedDay={selDay} onSelect={setSelDay} />
                   </div>
+                  {!selDay && (
+                    <div style={{ fontSize: "12px", color: "var(--muted)", textAlign: "center" }}>
+                      Klicke auf einen Tag, um die Trades beider Journale (inkl. Confluences & Screenshots) zu sehen.
+                    </div>
+                  )}
+                  {selDay && (
+                    <div style={friendsCard}>
+                      <div style={friendsSectionTitle}>{friendsDayLabel(selDay)}</div>
+                      <div style={{ display: "flex", gap: "24px", flexWrap: "wrap", alignItems: "flex-start" }}>
+                        {[["Ich", ME_COLOR, myDay], [active.name, FRIEND_COLOR, theirDay]].map(([nm, col, list]) => (
+                          <div key={nm} style={{ flex: 1, minWidth: "320px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px", borderBottom: `2px solid ${col}`, paddingBottom: "8px" }}>
+                              <FriendAvatar name={nm} color={col} size={24} />
+                              <span style={{ fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{nm}</span>
+                              <span style={{ marginLeft: "auto", fontSize: "12px", fontWeight: 700, color: list.reduce((s, t) => s + Number(t.pnl || 0), 0) >= 0 ? "#fff" : "var(--red)" }}>
+                                {fmtMoneyShort(list.reduce((s, t) => s + Number(t.pnl || 0), 0))}
+                              </span>
+                            </div>
+                            {list.length === 0 ? (
+                              <div className="notice">Kein Trade an diesem Tag.</div>
+                            ) : (
+                              list.map((t, i) => <FriendsTradeCard key={t.id ?? i} trade={t} onShot={setShot} />)
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </React.Fragment>
+              )}
+
+              {!fLoading && !fErr && tab === "trades" && (
+                <div style={{ display: "flex", gap: "28px", flexWrap: "wrap", alignItems: "flex-start" }}>
+                  {who !== "them" && (
+                    <FriendsTradeColumn key={`me-${period}-${resFilter}-${cur.month}`} name="Ich" color={ME_COLOR} trades={myList} onShot={setShot} />
+                  )}
+                  {who !== "me" && (
+                    <FriendsTradeColumn key={`th-${active.id}-${period}-${resFilter}-${cur.month}`} name={active.name} color={FRIEND_COLOR} trades={theirList} onShot={setShot} />
+                  )}
                 </div>
-              </React.Fragment>
-            )}
-          </React.Fragment>
-        )}
+              )}
+            </React.Fragment>
+          )}
+        </div>
       </div>
-    </div>
+
+      {shot && (
+        <div className="overlay" style={{ zIndex: 70 }} onClick={() => setShot(null)}>
+          <div className="panel" style={{ width: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div className="panel-head">
+              <span>Screenshot</span>
+              <button type="button" className="icon-btn" onClick={() => setShot(null)} aria-label="Schließen">
+                <Icon.Close />
+              </button>
+            </div>
+            <img className="shot-overlay-img" src={shot} alt="Trade Screenshot" />
+          </div>
+        </div>
+      )}
+    </React.Fragment>
   );
 }
 
