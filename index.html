@@ -605,6 +605,10 @@ const FUNDED_BALANCE_OVERRIDE =
    die Confluence-Auswertung und den Forward Test). Ohne diese Spalte fällt das
    Speichern automatisch auf ein Payload ohne "confluences" zurück:
    ALTER TABLE "Trades" ADD COLUMN confluences text[];
+
+   Ebenfalls optional: Spalte "plan_followed" (Typ: boolean, nullable) fuer "Mit Plan / Ohne Plan".
+   Ohne diese Spalte wird die Plan-Angabe NICHT gespeichert (es erscheint eine Warnung):
+   ALTER TABLE "Trades" ADD COLUMN plan_followed boolean;
 */
 
 /* ── Account-Regeln (Eval-Phase) ──
@@ -633,6 +637,13 @@ const PAYOUT_MAX_AMOUNT = 2000; // max. Auszahlung pro Zyklus
 const PAYOUT_MIN_DAYS = 2; // min. Handelstage pro Payout-Zyklus
 const PAYOUT_CONSISTENCY_PCT = 50;
 const PAYOUT_DD_PEAK_CAP = 51600;
+const PAYOUT_MAX_SIM = 5; // max. Sim-Payouts, danach Live-Promotion
+const PAYOUT_SPLIT = 0.8; // 80/20
+const MLL_AFTER_FIRST_PAYOUT = STARTING_BALANCE + 100; // nach dem 1. Payout wird die MLL statisch (50.100$)
+const PLAN_COLUMN_WARNING = T(
+  "Spalte \"plan_followed\" fehlt in Supabase — die Plan-Angabe wurde NICHT gespeichert (SQL siehe oben im Code).",
+  "Column \"plan_followed\" is missing in Supabase — the plan flag was NOT saved (see SQL at the top of the code)."
+);
 
 // Mindestanzahl an Trades, ab der eine Confluence-Kombination im "Top-Kombinationen"-Ranking
 // berücksichtigt wird — verhindert, dass 1-2 Zufallstreffer als "100% Winrate" auftauchen.
@@ -755,6 +766,11 @@ function isoDate(year, month, day) {
   const d = String(day).padStart(2, "0");
   return `${year}-${m}-${d}`;
 }
+// Heutiges Datum in LOKALER Zeit (toISOString() liefert UTC und waere zwischen 0 und 2 Uhr noch "gestern")
+function localIsoToday() {
+  const n = new Date();
+  return isoDate(n.getFullYear(), n.getMonth(), n.getDate());
+}
 function isoWeek(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = (d.getUTCDay() + 6) % 7;
@@ -874,20 +890,40 @@ function TradingJournal() {
     try { return localStorage.getItem("journal_funded_activated_at") || null; } catch { return null; }
   });
 
-  // Datum des letzten Payouts = Start des aktuellen Payout-Zyklus (pro Profil gespeichert)
-  const [lastPayoutDate, setLastPayoutDate] = useState(() => {
-    try { return localStorage.getItem("journal_funded_last_payout") || ""; } catch { return ""; }
+  // Payout-Log (pro Profil im Browser gespeichert, wie die Funded-Stage-Einstellungen):
+  // jeder Eintrag = Datum + Betrag (brutto, vom Konto abgebucht). Der letzte Eintrag startet den naechsten Zyklus.
+  const [payouts, setPayouts] = useState(() => {
+    try {
+      const raw = localStorage.getItem("journal_funded_payouts");
+      if (raw) { const v = JSON.parse(raw); if (Array.isArray(v)) return v; }
+      // Uebernahme des frueheren Einzel-Datums "letzter Payout"
+      const old = localStorage.getItem("journal_funded_last_payout");
+      if (old) return [{ date: old, amount: null }];
+    } catch {}
+    return [];
   });
-  const updateLastPayoutDate = useCallback((v) => {
-    try { localStorage.setItem("journal_funded_last_payout", v || ""); } catch {}
-    setLastPayoutDate(v || "");
+  const savePayouts = useCallback((next) => {
+    const sorted = [...next].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    try { localStorage.setItem("journal_funded_payouts", JSON.stringify(sorted)); } catch {}
+    setPayouts(sorted);
   }, []);
+  const addPayout = useCallback((date, amount) => {
+    savePayouts([...payouts, { date, amount }]);
+    pushToast(T("Payout eingetragen", "Payout added"));
+  }, [payouts, savePayouts, pushToast]);
+  const deletePayout = useCallback((p) => {
+    if (!window.confirm(T("Diesen Payout-Eintrag löschen?", "Delete this payout entry?"))) return;
+    savePayouts(payouts.filter((x) => x !== p));
+  }, [payouts, savePayouts]);
+  const lastPayoutDate = payouts.length ? payouts[payouts.length - 1].date : "";
+  const payoutCount = payouts.length;
+  const payoutTotal = payouts.reduce((s, p) => s + (Number(p.amount) || 0), 0);
 
   const evalPassed = fundedStage;
   const evalPassedDate = fundedStartDate;
 
   const activateFundedStage = useCallback(() => {
-    const d = new Date().toISOString().slice(0, 10);
+    const d = localIsoToday();
     const dt = new Date().toISOString();
     try {
       localStorage.setItem("journal_funded_stage", "1");
@@ -928,7 +964,7 @@ function TradingJournal() {
   const restoreFundedStage = useCallback((dateTimeLocal) => {
     if (!dateTimeLocal) return;
     const dt = new Date(dateTimeLocal).toISOString();
-    const d = dt.slice(0, 10);
+    const d = dateTimeLocal.slice(0, 10); // lokales Datum aus dem datetime-local-Feld (nicht UTC)
     try {
       localStorage.setItem("journal_funded_stage", "1");
       localStorage.setItem("journal_funded_start_date", d);
@@ -1057,6 +1093,36 @@ function TradingJournal() {
       .sort((a, b) => b.count - a.count);
   }, [filteredTrades, realizedRRForTrade]);
   const maxSetupCount = Math.max(1, ...setupStats.map((s) => s.count));
+
+  // ── Plan-Analyse: Trades "mit Plan" vs. "ohne Plan" (respektiert die Filter der Filterleiste) ──
+  const planStats = useMemo(() => {
+    const mk = () => ({ count: 0, wins: 0, losses: 0, rrSum: 0, rrCount: 0, pnl: 0, grossProfit: 0, grossLoss: 0, decidedPnl: 0 });
+    const yes = mk();
+    const no = mk();
+    let unknown = 0;
+    filteredTrades.forEach((t) => {
+      const g = t.plan_followed === true ? yes : t.plan_followed === false ? no : null;
+      if (!g) { unknown += 1; return; }
+      const pnl = Number(t.pnl || 0);
+      g.count += 1;
+      g.pnl += pnl;
+      if (t.result === "win") { g.wins += 1; g.grossProfit += pnl; g.decidedPnl += pnl; }
+      else if (t.result === "loss") { g.losses += 1; g.grossLoss += Math.abs(pnl); g.decidedPnl += pnl; }
+      const rr = realizedRRForTrade(t);
+      if (rr !== null && !Number.isNaN(rr)) { g.rrSum += rr; g.rrCount += 1; }
+    });
+    const fin = (g) => {
+      const decided = g.wins + g.losses;
+      return {
+        ...g,
+        winrate: decided ? (g.wins / decided) * 100 : 0,
+        avgRR: g.rrCount ? g.rrSum / g.rrCount : 0,
+        expectancy: decided ? g.decidedPnl / decided : 0,
+        profitFactor: g.grossLoss > 0 ? g.grossProfit / g.grossLoss : g.grossProfit > 0 ? Infinity : 0,
+      };
+    };
+    return { yes: fin(yes), no: fin(no), unknown, withInfo: yes.count + no.count };
+  }, [filteredTrades, realizedRRForTrade]);
 
   // ── Top Confluence-Kombinationen ──
   // Berechnet für jede 2er- und 3er-Kombination von Confluences, die in mindestens
@@ -1327,7 +1393,7 @@ function TradingJournal() {
     const fundedBase = fundedStage ? FUNDED_BALANCE_OVERRIDE : STARTING_BALANCE;
 
     const totalPnl = fundedTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
-    const balance = fundedBase + totalPnl;
+    const balance = fundedBase + totalPnl - (fundedStage ? payoutTotal : 0); // Auszahlungen verringern das Konto
 
     let running = fundedBase;
     let peak = fundedBase;
@@ -1370,7 +1436,8 @@ function TradingJournal() {
     const activeDdBuffer = fundedStage ? DD_BUFFER : EVAL_DD_BUFFER;
     const activeDdPeakCap = fundedStage ? DD_PEAK_CAP : EVAL_DD_PEAK_CAP;
     const cappedPeak = Math.min(eodPeak, activeDdPeakCap);
-    const mll = cappedPeak - activeDdBuffer;
+    // Nach dem ersten Payout ist die MLL statisch (Start + 100$)
+    const mll = fundedStage && payoutCount > 0 ? MLL_AFTER_FIRST_PAYOUT : cappedPeak - activeDdBuffer;
     const ddBufferRemaining = balance - mll;
     const ddMaxSpan = Math.max(1, eodPeak - mll);
     const ddRiskPct = Math.max(0, Math.min(100, 100 - (ddBufferRemaining / ddMaxSpan) * 100));
@@ -1384,7 +1451,7 @@ function TradingJournal() {
       tradingDays, eodPeak, eodBalance, mll, ddBufferRemaining, ddRiskPct,
       distanceToPass, passProgressPct, accountPassed,
     };
-  }, [trades, fundedStage, fundedActivatedAt]);
+  }, [trades, fundedStage, fundedActivatedAt, payoutTotal, payoutCount]);
 
   // ── Payout-Phase Stats ──
   // Aktiv sobald "Eval Passed" gesetzt ist. Zählt nur Trading-Tage ab dem
@@ -1430,7 +1497,7 @@ function TradingJournal() {
       if (eodBalance > eodPeak) eodPeak = eodBalance;
     });
     const cappedPeak = Math.min(eodPeak, PAYOUT_DD_PEAK_CAP);
-    const mll = cappedPeak - DD_BUFFER;
+    const mll = payoutCount > 0 ? MLL_AFTER_FIRST_PAYOUT : cappedPeak - DD_BUFFER;
     const balance = accountStats.balance;
     const ddBufferRemaining = balance - mll;
     const ddMaxSpan = Math.max(1, eodPeak - mll);
@@ -1444,7 +1511,7 @@ function TradingJournal() {
       eodPeak, mll, ddBufferRemaining, ddRiskPct,
       allRulesPassed, cycleNetProfit, profitAboveBuffer, profitPassed, payoutAmount,
     };
-  }, [evalPassed, evalPassedDate, lastPayoutDate, accountStats.tradingDays, accountStats.balance, trades]);
+  }, [evalPassed, evalPassedDate, lastPayoutDate, payoutCount, accountStats.tradingDays, accountStats.balance, trades]);
 
   const calendar = useMemo(() => {
     const { year, month } = cursor;
@@ -1530,6 +1597,13 @@ function TradingJournal() {
         payload = rest;
         res = await fetch(REST_URL, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
         if (!res.ok) body = await res.text();
+      }
+      if (!res.ok && /plan_followed/i.test(body) && payload.plan_followed !== undefined) {
+        const { plan_followed, ...rest } = payload;
+        payload = rest;
+        res = await fetch(REST_URL, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
+        if (!res.ok) body = await res.text();
+        else if (plan_followed !== null) pushToast(PLAN_COLUMN_WARNING, "error");
       }
       if (!res.ok) throw new Error(T(`Speichern fehlgeschlagen (${res.status}): ${body}`, `Saving failed (${res.status}): ${body}`));
     }
@@ -1617,6 +1691,17 @@ function TradingJournal() {
               body: JSON.stringify(patchPayload),
             });
             if (!res.ok) body = await res.text();
+          }
+          if (!res.ok && /plan_followed/i.test(body) && patchPayload.plan_followed !== undefined) {
+            const { plan_followed, ...rest } = patchPayload;
+            patchPayload = rest;
+            res = await fetch(`${REST_URL}?id=eq.${id}`, {
+              method: "PATCH",
+              headers: sbHeaders,
+              body: JSON.stringify(patchPayload),
+            });
+            if (!res.ok) body = await res.text();
+            else if (plan_followed !== null) pushToast(PLAN_COLUMN_WARNING, "error");
           }
           if (!res.ok) throw new Error(T(`Aktualisieren fehlgeschlagen (${res.status}): ${body}`, `Update failed (${res.status}): ${body}`));
         }
@@ -1913,11 +1998,9 @@ function TradingJournal() {
             <span className="payout-sub">
               {T("Min. $500 nötig · auszahlbar:", "Min. $500 required · payable:")} {payoutStats.profitPassed ? fmtMoney(payoutStats.payoutAmount) : "—"} {T("(max. $2.000, 80/20)", "(max. $2,000, 80/20)")}
             </span>
-            <label className="payout-sub" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              {T("Letzter Payout", "Last payout")}
-              <input type="date" style={friendsDateStyle} value={lastPayoutDate} onChange={(e) => updateLastPayoutDate(e.target.value)} />
-            </label>
           </div>
+
+          <PayoutLog payouts={payouts} onAdd={addPayout} onDelete={deletePayout} />
         </div>
       )}
 
@@ -2080,6 +2163,42 @@ function TradingJournal() {
         </span>
       </section>
 
+      <section className="insights-card">
+        <div className="insights-title">{T("Plan-Analyse: mit Plan vs. ohne Plan", "Plan analysis: with plan vs. without plan")}</div>
+        {planStats.withInfo === 0 ? (
+          <span className="insight-sub">{T("Noch keine Trades mit Plan-Angabe. Markiere beim nächsten Trade „Mit Plan“ oder „Ohne Plan“, um hier den Vergleich zu sehen.", "No trades with a plan flag yet. Mark your next trade “With plan” or “Without plan” to see the comparison here.")}</span>
+        ) : (
+          <React.Fragment>
+            <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 1fr", gap: "10px 18px", alignItems: "center" }}>
+              <span />
+              <b style={{ color: "#2ecc71", fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{T("Mit Plan", "With plan")}</b>
+              <b style={{ color: "#ff6b78", fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{T("Ohne Plan", "Without plan")}</b>
+              {[
+                ["Trades", (g) => String(g.count)],
+                ["Winrate", (g) => (g.wins + g.losses ? `${g.winrate.toFixed(0)}%` : "—")],
+                ["Ø RR", (g) => (g.rrCount ? `${g.avgRR.toFixed(2)}R` : "—")],
+                ["Expectancy / Trade", (g) => (g.wins + g.losses ? fmtMoneyShort(g.expectancy) : "—")],
+                ["Profit Factor", (g) => (g.count ? (Number.isFinite(g.profitFactor) ? g.profitFactor.toFixed(2) : "∞") : "—")],
+                [T("Netto PnL", "Net PnL"), (g) => fmtMoneyShort(g.pnl)],
+              ].map(([label, fmt]) => (
+                <React.Fragment key={label}>
+                  <span className="insight-sub">{label}</span>
+                  <span style={{ fontWeight: 700 }}>{fmt(planStats.yes)}</span>
+                  <span style={{ fontWeight: 700 }}>{fmt(planStats.no)}</span>
+                </React.Fragment>
+              ))}
+            </div>
+            <span style={{ fontSize: "11px", color: "var(--muted-light)", marginTop: "10px", display: "block", lineHeight: 1.6 }}>
+              {planStats.no.count > 0 && planStats.no.pnl < 0
+                ? T(`Trades ohne Plan haben dich insgesamt ${fmtMoney(Math.abs(planStats.no.pnl))} gekostet. `, `Trades without a plan cost you ${fmtMoney(Math.abs(planStats.no.pnl))} in total. `)
+                : ""}
+              {planStats.unknown > 0 ? T(`${planStats.unknown} Trades ohne Plan-Angabe sind nicht enthalten. `, `${planStats.unknown} trades without a plan flag are not included. `) : ""}
+              {planStats.yes.count < 10 || planStats.no.count < 10 ? T("Achtung: kleine Stichprobe (unter 10 Trades in einer Gruppe), mit Vorsicht interpretieren.", "Warning: small sample (under 10 trades in one group), interpret with caution.") : ""}
+            </span>
+          </React.Fragment>
+        )}
+      </section>
+
       <section className="cal-card">
         <div className="cal-head">
           <div className="cal-title">
@@ -2235,6 +2354,53 @@ function StatCard({ label, value }) {
   );
 }
 
+// Payout-Log: Auszahlungen eintragen (Datum + Betrag brutto). Zaehlt Sim-Payouts (max. 5), zeigt Summe und
+// den 80%-Anteil. Der letzte Eintrag startet den naechsten Payout-Zyklus, ab dem 1. Payout ist die MLL statisch.
+function PayoutLog({ payouts, onAdd, onDelete }) {
+  const [date, setDate] = useState(() => localIsoToday());
+  const [amount, setAmount] = useState("");
+  const total = payouts.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const canAdd = !!date && Number(amount) > 0;
+  const inputSt = { ...friendsDateStyle, width: "150px" };
+  const rows = payouts.map((p, i) => ({ p, n: i + 1 })).reverse();
+  return (
+    <div className="payout-card" style={{ gridColumn: "1 / -1" }}>
+      <div className="payout-card-title">
+        <span className={`payout-status-dot ${payouts.length >= PAYOUT_MAX_SIM ? "ok" : ""}`} />
+        {T("Payout-Log", "Payout log")} · {payouts.length} / {PAYOUT_MAX_SIM} {T("Sim-Payouts", "sim payouts")}
+      </div>
+      <span className="payout-sub">
+        {T("Summe", "Total")}: <b style={{ color: "#fff" }}>{fmtMoney(total)}</b> · {T("dein Anteil (80%)", "your share (80%)")}: <b style={{ color: "#fff" }}>{fmtMoney(total * PAYOUT_SPLIT)}</b>
+        {payouts.length >= PAYOUT_MAX_SIM ? ` · ${T("Live-Promotion möglich", "eligible for live promotion")}` : ""}
+        {payouts.length > 0 ? ` · ${T(`MLL seit dem 1. Payout statisch bei ${fmtMoney(MLL_AFTER_FIRST_PAYOUT)}`, `MLL static at ${fmtMoney(MLL_AFTER_FIRST_PAYOUT)} since the 1st payout`)}` : ""}
+      </span>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+        <input type="date" style={inputSt} value={date} onChange={(e) => setDate(e.target.value)} />
+        <input type="number" min="0" step="any" style={inputSt} placeholder={T("Betrag $ (brutto)", "Amount $ (gross)")} value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <button type="button" className="payout-banner-clear" disabled={!canAdd} onClick={() => { onAdd(date, Number(amount)); setAmount(""); }}>
+          {T("+ Payout eintragen", "+ Add payout")}
+        </button>
+        <span className="payout-sub">{T("Brutto = vom Konto abgebuchter Betrag. Verringert die Balance oben.", "Gross = amount withdrawn from the account. Reduces the balance above.")}</span>
+      </div>
+      {rows.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginTop: "4px" }}>
+          {rows.map(({ p, n }) => (
+            <div key={`${p.date}-${n}`} style={{ display: "flex", alignItems: "center", gap: "14px", fontSize: "12px", color: "var(--muted-light)", borderTop: "1px dashed var(--line)", paddingTop: "6px" }}>
+              <span style={{ width: "34px" }}>#{n}</span>
+              <span style={{ width: "100px" }}>{p.date}</span>
+              <b style={{ color: "#fff", width: "110px" }}>{p.amount ? fmtMoney(Number(p.amount)) : "—"}</b>
+              <span>{p.amount ? `${T("Anteil", "Share")} ${fmtMoney(Number(p.amount) * PAYOUT_SPLIT)}` : ""}</span>
+              <button type="button" className="icon-btn delete-btn" style={{ marginLeft: "auto" }} onClick={() => onDelete(p)} aria-label={T("Payout löschen", "Delete payout")}>
+                <Icon.Trash />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Einmalige manuelle Wiederherstellung, falls Start-/Aktivierungsdatum der Funded
 // Stage bereits verloren gegangen sind (z. B. durch eine alte Version des
 // "Zurueck zur Eval Stage"-Buttons). Erscheint nur solange kein fundedStartDate
@@ -2315,7 +2481,7 @@ function EquityCurve({ data }) {
 }
 
 function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit = false, existingSetups = [], existingConfluences = [] }) {
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = localIsoToday();
   const [form, setForm] = useState(() => {
     if (initialTrade) {
       return {
@@ -2331,6 +2497,7 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
         screenshot: initialTrade.screenshot || "",
         setup: initialTrade.setup || "",
         confluences: Array.isArray(initialTrade.confluences) ? initialTrade.confluences : [],
+        plan_followed: initialTrade.plan_followed === true ? "yes" : initialTrade.plan_followed === false ? "no" : "",
       };
     }
     return {
@@ -2346,6 +2513,7 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
       screenshot: "",
       setup: "",
       confluences: [],
+      plan_followed: "yes", // Standard: Mit Plan
     };
   });
   const [touched, setTouched] = useState(false);
@@ -2430,6 +2598,7 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
     screenshot: form.screenshot || null,
     setup: form.setup || null,
     confluences: form.confluences && form.confluences.length ? form.confluences : null,
+    plan_followed: form.plan_followed === "yes" ? true : form.plan_followed === "no" ? false : null,
   });
 
   const submit = (e) => {
@@ -2644,6 +2813,27 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
             </div>
 
             <div className="field">
+              <label>{T("Plan befolgt?", "Plan followed?")}</label>
+              <div className="dir-toggle">
+                <button
+                  type="button"
+                  className={`dir-btn res-win ${form.plan_followed === "yes" ? "active" : ""}`}
+                  onClick={() => setForm((f) => ({ ...f, plan_followed: "yes" }))}
+                >
+                  {T("Mit Plan", "With plan")}
+                </button>
+                <button
+                  type="button"
+                  className={`dir-btn res-loss ${form.plan_followed === "no" ? "active" : ""}`}
+                  onClick={() => setForm((f) => ({ ...f, plan_followed: "no" }))}
+                >
+                  {T("Ohne Plan", "Without plan")}
+                </button>
+              </div>
+              <span style={{ fontSize: "11px", color: "var(--muted-light)" }}>{T("Standard: Mit Plan. Bei einem Regelbruch auf „Ohne Plan“ umstellen.", "Default: with plan. Switch to “Without plan” if you broke your rules.")}</span>
+            </div>
+
+            <div className="field">
               <label>{T("Notiz", "Note")}</label>
               <textarea placeholder={T("Setup, Begründung, Lessons Learned…", "Setup, reasoning, lessons learned…")} value={form.note} onChange={set("note")} />
             </div>
@@ -2749,7 +2939,7 @@ function TradeRow({ trade, onDelete, onEdit }) {
           {trade.direction === "long" ? "Long" : "Short"}
         </span>
         <span className="trade-meta">
-          {trade.symbol ?? ""} {trade.contracts ? `x${trade.contracts}` : ""} · SL {trade.stop_loss ?? "—"} · TP {trade.take_profit ?? "—"} · RR {trade.rr ? Number(trade.rr).toFixed(2) : "—"}{trade.setup ? ` · ${trade.setup}` : ""}
+          {trade.symbol ?? ""} {trade.contracts ? `x${trade.contracts}` : ""} · SL {trade.stop_loss ?? "—"} · TP {trade.take_profit ?? "—"} · RR {trade.rr ? Number(trade.rr).toFixed(2) : "—"}{trade.setup ? ` · ${trade.setup}` : ""}{trade.plan_followed === true ? " · Plan ✓" : trade.plan_followed === false ? " · Plan ✗" : ""}
         </span>
         {trade.screenshot && (
           <button type="button" className="trade-shot-btn" onClick={() => setShowShot(true)}>
@@ -3202,7 +3392,7 @@ function FriendsTradeCard({ trade, onShot }) {
         </span>
       </div>
       <div style={{ fontSize: "12px", color: "var(--muted-light)" }}>
-        SL {trade.stop_loss ?? "—"} · TP {trade.take_profit ?? "—"} · RR {rr}{trade.setup ? ` · ${trade.setup}` : ""}
+        SL {trade.stop_loss ?? "—"} · TP {trade.take_profit ?? "—"} · RR {rr}{trade.setup ? ` · ${trade.setup}` : ""}{trade.plan_followed === true ? " · Plan ✓" : trade.plan_followed === false ? " · Plan ✗" : ""}
       </div>
       {tags.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
@@ -3789,7 +3979,7 @@ function FriendsPanel({ onClose, myTrades }) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `journal-${T("vergleich", "comparison")}-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `journal-${T("vergleich", "comparison")}-${localIsoToday()}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();
