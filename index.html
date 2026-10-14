@@ -558,6 +558,26 @@
     [style*="180px 1fr 1fr"] { grid-template-columns: 96px 1fr 1fr !important; gap: 8px !important; }
     [style*="112px 1fr 1fr"] { grid-template-columns: 76px 1fr 1fr !important; gap: 8px !important; }
   }
+
+  /* ── Analyse-Panel ── */
+  .an-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .an-tabs { flex-wrap: wrap; }
+  .an-scroll { overflow-x: auto; }
+  .an-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .an-table th { text-align: left; font-size: 10.5px; font-weight: 400; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; padding: 0 14px 10px 0; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  .an-table td { padding: 10px 14px 10px 0; border-bottom: 1px solid var(--line); white-space: nowrap; font-family: 'JetBrains Mono', monospace; }
+  .an-table tr:last-child td { border-bottom: none; }
+  .an-table td.pos { color: var(--text); }
+  .an-table td.neg { color: var(--red); }
+  .an-note { display: block; margin-top: 14px; font-size: 11px; line-height: 1.6; color: var(--muted-light); }
+  .an-note.neg { color: #ff6b78; }
+  .insight-sub.pos { color: var(--text); }
+  .insight-sub.neg { color: var(--red); }
+  .heat-months, .heat-grid { display: grid; gap: 3px; }
+  .heat-months { font-size: 10px; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .heat-grid { grid-template-rows: repeat(7, 13px); grid-auto-flow: column; }
+  .heat-cell { width: 13px; height: 13px; border-radius: 2px; background: var(--panel-2); border: 1px solid var(--line); }
+  .heat-cell.has { border-color: transparent; }
 </style>
 </head>
 <body>
@@ -1438,6 +1458,14 @@ function TradingJournal() {
   }, [trades, filterSymbol, filterResult]);
 
   const hasActiveFilters = filterSymbol !== "all" || filterResult !== "all";
+
+  // Basis fuer Analyse-Panel: wie die Performance-Stats (Funded-Stage beachtet, ab STATS_CUTOFF_DATE)
+  const analysisTrades = useMemo(() => {
+    const base = fundedStage && fundedActivatedAt
+      ? filteredTrades.filter((t) => t.created_at && t.created_at >= fundedActivatedAt)
+      : filteredTrades;
+    return base.filter((t) => t.trade_date >= STATS_CUTOFF_DATE);
+  }, [filteredTrades, fundedStage, fundedActivatedAt]);
 
   // Bereits verwendete Setup-Namen (für Autovervollständigung im Formular)
   const existingSetups = useMemo(() => {
@@ -2841,6 +2869,14 @@ notify pgrst, 'reload schema';`;
         )}
       </section>
 
+      <AnalysisPanel
+        statsList={analysisTrades}
+        fullList={filteredTrades}
+        accountStats={accountStats}
+        fundedStage={fundedStage}
+        payoutCount={payoutCount}
+      />
+
       <section className="cal-card">
         <div className="cal-head">
           <div className="cal-title">
@@ -2987,6 +3023,443 @@ notify pgrst, 'reload schema';`;
   );
 }
 
+/* ============================================================
+   ANALYSE-PANEL
+   Edge-Kennzahlen, R-Verteilung, Verhaltensanalyse, Monte-Carlo-Chance,
+   Perioden-Report und Jahres-Heatmap. Es wird nur der aktive Tab berechnet.
+   ============================================================ */
+const fmtPct = (x, d = 0) => (Number.isFinite(x) ? `${(x * 100).toFixed(d)}%` : "—");
+const fmtR = (x) => (Number.isFinite(x) ? `${x >= 0 ? "+" : ""}${x.toFixed(2)}R` : "—");
+const toneOf = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
+const SMALL_SAMPLE = 30;
+
+function Metric({ label, value, sub, tone = "" }) {
+  return (
+    <div className="insight-item">
+      <span className="insight-label">{label}</span>
+      <span className={`insight-value ${tone}`}>{value}</span>
+      {sub ? <span className="insight-sub">{sub}</span> : null}
+    </div>
+  );
+}
+
+function EmptyNote({ children }) {
+  return <span className="insight-sub">{children || T("Noch keine Daten in diesem Zeitraum.", "No data in this period yet.")}</span>;
+}
+
+function SampleNote({ n }) {
+  if (n >= SMALL_SAMPLE) return null;
+  return (
+    <span className="an-note">
+      {T(
+        `Kleine Stichprobe (${n} Trades, unter ${SMALL_SAMPLE}): Die Kennzahlen schwanken stark, das Intervall ist wichtiger als die Zahl.`,
+        `Small sample (${n} trades, under ${SMALL_SAMPLE}): the figures swing a lot, the interval matters more than the number.`
+      )}
+    </span>
+  );
+}
+
+function EdgeTab({ list }) {
+  const e = useMemo(() => computeEdgeStats(list), [list]);
+  if (!e.n) return <EmptyNote />;
+  const wins = list.filter((t) => t.result === "win").length;
+  return (
+    <>
+      <div className="insights-grid">
+        <Metric
+          label="Winrate"
+          value={e.decided ? fmtPct(e.winrate) : "—"}
+          sub={e.decided ? T(`95%-Intervall ${fmtCI(wins, e.decided)} (${e.decided} Trades)`, `95% interval ${fmtCI(wins, e.decided)} (${e.decided} trades)`) : null}
+        />
+        <Metric
+          label="Expectancy / Trade"
+          value={e.decided ? fmtMoneyShort(e.expectancy) : "—"}
+          tone={toneOf(e.expectancy)}
+          sub={e.decided ? T(`Ø Win ${fmtMoneyShort(e.avgWin)} · Ø Loss ${fmtMoneyShort(e.avgLoss)}`, `Avg win ${fmtMoneyShort(e.avgWin)} · avg loss ${fmtMoneyShort(e.avgLoss)}`) : null}
+        />
+        <Metric
+          label="Payoff Ratio"
+          value={Number.isFinite(e.payoff) ? e.payoff.toFixed(2) : e.decided ? "∞" : "—"}
+          sub={T("Ø Gewinn geteilt durch Ø Verlust", "Avg win divided by avg loss")}
+        />
+        <Metric
+          label={T("Expectancy (R)", "Expectancy (R)")}
+          value={e.sdR || e.expR ? fmtR(e.expR) : "—"}
+          tone={toneOf(e.expR)}
+          sub={e.sdR ? T(`Streuung ${e.sdR.toFixed(2)}R`, `Std dev ${e.sdR.toFixed(2)}R`) : null}
+        />
+        <Metric label="SQN" value={e.sqn === null ? "—" : e.sqn.toFixed(2)} tone={e.sqn === null ? "" : toneOf(e.sqn - 1.6)} sub={sqnLabel(e.sqn)} />
+        <Metric
+          label="Kelly"
+          value={e.kelly === null ? "—" : fmtPct(e.kelly, 1)}
+          tone={e.kelly === null ? "" : toneOf(e.kelly)}
+          sub={e.kelly === null ? T("ab 10 Trades mit Win und Loss", "from 10 trades with wins and losses") : e.kelly > 0 ? T(`Halb-Kelly ${fmtPct(e.kelly / 2, 1)} als Obergrenze`, `Half Kelly ${fmtPct(e.kelly / 2, 1)} as ceiling`) : T("Kein Edge laut Kelly", "No edge according to Kelly")}
+        />
+        <Metric
+          label="Recovery Factor"
+          value={e.recovery === null ? "—" : e.recovery.toFixed(2)}
+          tone={e.recovery === null ? "" : toneOf(e.recovery)}
+          sub={T(`Netto ${fmtMoneyShort(e.net)} bei Max DD ${fmtMoneyShort(-e.maxDD)}`, `Net ${fmtMoneyShort(e.net)} at max DD ${fmtMoneyShort(-e.maxDD)}`)}
+        />
+        <Metric
+          label={T("Risiko / Trade", "Risk / trade")}
+          value={e.riskN ? fmtMoney(e.avgRisk) : "—"}
+          sub={e.riskN ? T(`Maximum ${fmtMoney(e.maxRisk)}`, `Maximum ${fmtMoney(e.maxRisk)}`) : null}
+        />
+      </div>
+      <SampleNote n={e.decided} />
+    </>
+  );
+}
+
+function DistTab({ list }) {
+  const d = useMemo(() => rDistribution(list), [list]);
+  if (!d.total) return <EmptyNote />;
+  const maxShare = Math.max(...d.rows.map((r) => r.share), 0.0001);
+  return (
+    <>
+      {d.rows.map((r) => (
+        <div className="breakdown-row" key={r.label}>
+          <span className="breakdown-label">{r.label}</span>
+          <div className="breakdown-bar-track">
+            <div className={`breakdown-bar-fill ${r.label === "Loss" ? "neg" : ""}`} style={{ width: `${(r.share / maxShare) * 100}%` }} />
+          </div>
+          <span className="breakdown-value">{fmtPct(r.share)}</span>
+          <span className="breakdown-count">{r.count}x</span>
+        </div>
+      ))}
+      <SampleNote n={d.total} />
+    </>
+  );
+}
+
+function BehaviorTab({ list }) {
+  const b = useMemo(() => behaviorStats(list), [list]);
+  if (!b.dayCount) return <EmptyNote />;
+  const rows = [
+    [T("Erster Trade des Tages", "First trade of the day"), b.first],
+    [T("Nach einem Gewinn", "After a win"), b.afterWin],
+    [T("Nach einem Verlust", "After a loss"), b.afterLoss],
+    [T("… mit mehr Contracts", "… with more contracts"), b.bigger],
+    [T("… mit gleich/weniger Contracts", "… with same/fewer contracts"), b.notBigger],
+  ];
+  const revenge = b.bigger.n >= 3 && b.notBigger.n >= 3 && b.bigger.avgPnl < b.notBigger.avgPnl;
+  const maxHour = Math.max(...b.byHour.map((h) => Math.abs(h.pnl)), 1);
+  return (
+    <>
+      <div className="an-scroll">
+        <table className="an-table">
+          <thead>
+            <tr>
+              <th>{T("Situation", "Situation")}</th>
+              <th>Trades</th>
+              <th>Winrate</th>
+              <th>{T("Ø PnL", "Avg PnL")}</th>
+              <th>{T("Ohne Plan", "No plan")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([label, g]) => (
+              <tr key={label}>
+                <td>{label}</td>
+                <td>{g.n}</td>
+                <td>{g.wins + g.losses ? `${fmtPct(g.winrate)} (${fmtCI(g.wins, g.wins + g.losses)})` : "—"}</td>
+                <td className={toneOf(g.avgPnl)}>{g.n ? fmtMoneyShort(g.avgPnl) : "—"}</td>
+                <td>{g.planKnown ? fmtPct(g.noPlanShare) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {revenge && (
+        <span className="an-note neg">
+          {T(
+            `Größer nach Verlust kostet: Ø ${fmtMoneyShort(b.bigger.avgPnl)} gegen Ø ${fmtMoneyShort(b.notBigger.avgPnl)} mit gleicher oder kleinerer Größe.`,
+            `Sizing up after a loss costs you: avg ${fmtMoneyShort(b.bigger.avgPnl)} versus avg ${fmtMoneyShort(b.notBigger.avgPnl)} with the same or smaller size.`
+          )}
+        </span>
+      )}
+
+      <div className="insights-col-title" style={{ marginTop: 22 }}>{T("Trades pro Tag", "Trades per day")}</div>
+      <div className="an-scroll">
+        <table className="an-table">
+          <thead>
+            <tr>
+              <th>{T("Trades", "Trades")}</th>
+              <th>{T("Tage", "Days")}</th>
+              <th>{T("Grüne Tage", "Green days")}</th>
+              <th>{T("Ø PnL / Tag", "Avg PnL / day")}</th>
+              <th>{T("Summe", "Total")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {b.dayGroups.map((g) => (
+              <tr key={g.label}>
+                <td>{g.label}</td>
+                <td>{g.days}</td>
+                <td>{g.days ? fmtPct(g.greenShare) : "—"}</td>
+                <td className={toneOf(g.avgPnl)}>{g.days ? fmtMoneyShort(g.avgPnl) : "—"}</td>
+                <td className={toneOf(g.pnl)}>{g.days ? fmtMoneyShort(g.pnl) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="insights-col-title" style={{ marginTop: 22 }}>{T("Nach Uhrzeit (Einstieg)", "By hour (entry)")}</div>
+      {b.byHour.length === 0 ? (
+        <EmptyNote>{T("Keine Trades mit erfasster Einstiegszeit.", "No trades with a recorded entry time.")}</EmptyNote>
+      ) : (
+        b.byHour.map((h) => (
+          <div className="breakdown-row" key={h.hour}>
+            <span className="breakdown-label">{String(h.hour).padStart(2, "0")}:00</span>
+            <div className="breakdown-bar-track">
+              <div className={`breakdown-bar-fill ${h.pnl < 0 ? "neg" : ""}`} style={{ width: `${(Math.abs(h.pnl) / maxHour) * 100}%` }} />
+            </div>
+            <span className={`breakdown-value ${h.pnl >= 0 ? "pos" : "neg"}`}>{fmtMoneyShort(h.pnl)}</span>
+            <span className="breakdown-count">{h.n}x</span>
+          </div>
+        ))
+      )}
+      <SampleNote n={list.length} />
+    </>
+  );
+}
+
+function ChanceTab({ list, accountStats, fundedStage, payoutCount }) {
+  const [maxDays, setMaxDays] = useState(40);
+  const scenario = useMemo(() => {
+    if (!fundedStage) {
+      return {
+        title: T("Eval bestehen", "Pass the eval"),
+        target: ACCOUNT_PASS_TARGET,
+        ddBuffer: EVAL_DD_BUFFER,
+        peakCap: EVAL_DD_PEAK_CAP,
+        staticMll: null,
+      };
+    }
+    return {
+      title: T("Nächsten Payout erreichen", "Reach the next payout"),
+      target: payoutCount > 0
+        ? accountStats.balance + PAYOUT_MIN_NET_PROFIT
+        : STARTING_BALANCE + PAYOUT_BUFFER + PAYOUT_MIN_NET_PROFIT,
+      ddBuffer: DD_BUFFER,
+      peakCap: DD_PEAK_CAP,
+      staticMll: payoutCount > 0 ? MLL_AFTER_FIRST_PAYOUT : null,
+    };
+  }, [fundedStage, payoutCount, accountStats.balance]);
+
+  const pnls = useMemo(() => list.filter((t) => t.result).map((t) => Number(t.pnl || 0)), [list]);
+  const dayLens = useMemo(() => Array.from(dailyPnlMap(list).values()).map((d) => d.n), [list]);
+  const sim = useMemo(
+    () => monteCarlo({
+      pnls, dayLens, balance: accountStats.balance, eodPeak: accountStats.eodPeak,
+      target: scenario.target, ddBuffer: scenario.ddBuffer, peakCap: scenario.peakCap,
+      staticMll: scenario.staticMll, maxDays,
+    }),
+    [pnls, dayLens, accountStats.balance, accountStats.eodPeak, scenario, maxDays]
+  );
+
+  if (!sim) return <EmptyNote>{T("Für die Simulation braucht es mindestens einen Trade.", "The simulation needs at least one trade.")}</EmptyNote>;
+  const range = (a, b) => (a === null ? "—" : `${Math.round(a)}–${Math.round(b)}`);
+  return (
+    <>
+      <div className="an-head" style={{ marginBottom: 14 }}>
+        <span className="insight-sub">{scenario.title}: {fmtMoney(scenario.target)}</span>
+        <div className="filter-group">
+          {[20, 40, 60, 90].map((d) => (
+            <button key={d} type="button" className={`filter-chip ${maxDays === d ? "active" : ""}`} onClick={() => setMaxDays(d)}>
+              {d} {T("Tage", "days")}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="insights-grid">
+        <Metric label={T("Chance Ziel", "Chance to hit")} value={fmtPct(sim.pass, 1)} tone={sim.pass >= 0.5 ? "pos" : ""} sub={T(`in ${sim.maxDays} Handelstagen`, `within ${sim.maxDays} trading days`)} />
+        <Metric label={T("Chance Bust", "Chance to bust")} value={fmtPct(sim.bust, 1)} tone={sim.bust >= 0.25 ? "neg" : ""} sub={T("MLL wird gerissen", "MLL is breached")} />
+        <Metric label={T("Noch offen", "Still open")} value={fmtPct(sim.open, 1)} sub={T("weder noch nach Ablauf", "neither by the end")} />
+        <Metric label={T("Dauer bis Ziel", "Time to target")} value={sim.medianDays === null ? "—" : `${Math.round(sim.medianDays)} ${T("Tage", "days")}`} sub={T(`Mitte 50%: ${range(sim.p25Days, sim.p75Days)} Tage`, `Middle 50%: ${range(sim.p25Days, sim.p75Days)} days`)} />
+        <Metric label={T("Endstand schlecht", "End balance, bad")} value={fmtMoney(sim.p10Final)} sub={T("10%-Quantil", "10th percentile")} />
+        <Metric label={T("Endstand typisch", "End balance, typical")} value={fmtMoney(sim.p50Final)} sub={T("Median", "Median")} />
+        <Metric label={T("Endstand gut", "End balance, good")} value={fmtMoney(sim.p90Final)} sub={T("90%-Quantil", "90th percentile")} />
+        <Metric label={T("Datenbasis", "Data basis")} value={`${pnls.length}`} sub={T(`Trades, ${sim.sims.toLocaleString(LOCALE)} Simulationen`, `trades, ${sim.sims.toLocaleString(LOCALE)} simulations`)} />
+      </div>
+      <span className="an-note">
+        {T(
+          "Schätzung aus deiner eigenen Historie (Ziehen mit Zurücklegen), keine Prognose. Sie nimmt an, dass deine künftigen Trades so verteilt sind wie bisher.",
+          "An estimate from your own history (sampling with replacement), not a forecast. It assumes your future trades are distributed like your past ones."
+        )}
+      </span>
+      <SampleNote n={pnls.length} />
+    </>
+  );
+}
+
+function periodLabel(key, by) {
+  if (by === "week") return T(`ab ${key.slice(8, 10)}.${key.slice(5, 7)}.${key.slice(2, 4)}`, `from ${key.slice(5, 7)}/${key.slice(8, 10)}/${key.slice(2, 4)}`);
+  return `${MONTHS[Number(key.slice(5, 7)) - 1].slice(0, 3)} ${key.slice(0, 4)}`;
+}
+
+function ReportTab({ list }) {
+  const [by, setBy] = useState("month");
+  const [all, setAll] = useState(false);
+  const rows = useMemo(() => periodReport(list, by), [list, by]);
+  if (!list.length) return <EmptyNote />;
+  const shown = all ? rows : rows.slice(0, 12);
+  return (
+    <>
+      <div className="an-head" style={{ marginBottom: 14 }}>
+        <span className="insight-sub">{T(`${rows.length} Perioden`, `${rows.length} periods`)}</span>
+        <div className="filter-group">
+          {[["month", T("Monate", "Months")], ["week", T("Wochen", "Weeks")]].map(([k, label]) => (
+            <button key={k} type="button" className={`filter-chip ${by === k ? "active" : ""}`} onClick={() => setBy(k)}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="an-scroll">
+        <table className="an-table">
+          <thead>
+            <tr>
+              <th>{T("Zeitraum", "Period")}</th>
+              <th>Trades</th>
+              <th>Winrate</th>
+              <th>PF</th>
+              <th>Ø R</th>
+              <th>{T("Grüne Tage", "Green days")}</th>
+              <th>{T("Bester / schlechtester Tag", "Best / worst day")}</th>
+              <th>PnL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((r) => (
+              <tr key={r.key}>
+                <td>{periodLabel(r.key, by)}</td>
+                <td>{r.n}</td>
+                <td>{r.wins + r.losses ? `${r.winrate.toFixed(0)}% (${fmtCI(r.wins, r.wins + r.losses)})` : "—"}</td>
+                <td>{Number.isFinite(r.pf) ? r.pf.toFixed(2) : "∞"}</td>
+                <td className={toneOf(r.avgR)}>{r.avgR || r.n ? fmtR(r.avgR) : "—"}</td>
+                <td>{r.greenDays}/{r.days}</td>
+                <td>{fmtMoneyShort(r.best)} / {fmtMoneyShort(r.worst)}</td>
+                <td className={toneOf(r.pnl)}><b>{fmtMoneyShort(r.pnl)}</b></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > 12 && (
+        <button type="button" className="filter-clear" style={{ marginTop: 12 }} onClick={() => setAll((v) => !v)}>
+          {all ? T("Weniger anzeigen", "Show less") : T(`Alle ${rows.length} anzeigen`, `Show all ${rows.length}`)}
+        </button>
+      )}
+    </>
+  );
+}
+
+function HeatTab({ list }) {
+  const years = useMemo(() => {
+    const set = new Set(list.map((t) => (t.trade_date || "").slice(0, 4)).filter(Boolean));
+    set.add(String(new Date().getFullYear()));
+    return Array.from(set).sort();
+  }, [list]);
+  const [year, setYear] = useState(() => years[years.length - 1]);
+  const data = useMemo(() => {
+    const map = dailyPnlMap(list);
+    const y = Number(year);
+    const first = new Date(y, 0, 1);
+    const offset = mondayIndex(first);
+    const total = daysInMonth(y, 1) === 29 ? 366 : 365;
+    const cells = Array.from({ length: offset }, () => null);
+    const monthStarts = [];
+    let maxAbs = 0, net = 0, green = 0, red = 0, best = null;
+    for (let i = 0; i < total; i++) {
+      const dt = new Date(y, 0, 1 + i);
+      const iso = isoDate(y, dt.getMonth(), dt.getDate());
+      const e = map.get(iso) || null;
+      if (dt.getDate() === 1) monthStarts.push({ month: dt.getMonth(), col: Math.floor((offset + i) / 7) });
+      if (e) {
+        maxAbs = Math.max(maxAbs, Math.abs(e.pnl));
+        net += e.pnl;
+        if (e.pnl > 0) green += 1; else if (e.pnl < 0) red += 1;
+        if (!best || e.pnl > best.pnl) best = { iso, pnl: e.pnl };
+      }
+      cells.push({ iso, e });
+    }
+    return { cells, monthStarts, maxAbs, net, green, red, best, weeks: Math.ceil(cells.length / 7) };
+  }, [list, year]);
+  const color = (e) => {
+    if (!e || e.pnl === 0) return e ? "rgba(255,255,255,0.08)" : null;
+    const a = 0.18 + 0.82 * (Math.abs(e.pnl) / (data.maxAbs || 1));
+    return e.pnl > 0 ? `rgba(255,255,255,${a.toFixed(2)})` : `rgba(224,0,26,${a.toFixed(2)})`;
+  };
+  return (
+    <>
+      <div className="an-head" style={{ marginBottom: 14 }}>
+        <span className={`insight-sub ${toneOf(data.net)}`}>
+          {T(`${year}: ${fmtMoneyShort(data.net)} · ${data.green} grüne / ${data.red} rote Tage`, `${year}: ${fmtMoneyShort(data.net)} · ${data.green} green / ${data.red} red days`)}
+          {data.best ? T(` · bester Tag ${fmtMoneyShort(data.best.pnl)}`, ` · best day ${fmtMoneyShort(data.best.pnl)}`) : ""}
+        </span>
+        <div className="filter-group">
+          {years.map((y) => (
+            <button key={y} type="button" className={`filter-chip ${year === y ? "active" : ""}`} onClick={() => setYear(y)}>{y}</button>
+          ))}
+        </div>
+      </div>
+      <div className="an-scroll">
+        <div className="heat-months" style={{ gridTemplateColumns: `repeat(${data.weeks}, 13px)` }}>
+          {data.monthStarts.map((m) => (
+            <span key={m.month} style={{ gridColumnStart: m.col + 1 }}>{MONTHS[m.month].slice(0, 3)}</span>
+          ))}
+        </div>
+        <div className="heat-grid" style={{ gridTemplateColumns: `repeat(${data.weeks}, 13px)` }}>
+          {data.cells.map((c, i) => c === null
+            ? <span key={`o${i}`} />
+            : (
+              <span
+                key={c.iso}
+                className={`heat-cell ${c.e ? "has" : ""}`}
+                style={color(c.e) ? { background: color(c.e) } : undefined}
+                title={c.e ? `${c.iso}: ${fmtMoneyShort(c.e.pnl)} (${c.e.n} Trades)` : c.iso}
+              />
+            ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+const ANALYSIS_TABS = [
+  ["edge", "Edge"],
+  ["dist", T("R-Verteilung", "R distribution")],
+  ["behavior", T("Verhalten", "Behavior")],
+  ["chance", T("Chance", "Odds")],
+  ["report", "Report"],
+  ["heat", "Heatmap"],
+];
+
+// statsList: Trades der Performance-Statistik (ab Cutoff, Funded-Stage beachtet).
+// fullList: komplette gefilterte Historie fuer Report und Heatmap.
+function AnalysisPanel({ statsList, fullList, accountStats, fundedStage, payoutCount }) {
+  const [tab, setTab] = useState("edge");
+  return (
+    <section className="insights-card">
+      <div className="an-head">
+        <div className="insights-title" style={{ margin: 0 }}>{T("Analyse", "Analysis")}</div>
+        <div className="filter-group an-tabs">
+          {ANALYSIS_TABS.map(([k, label]) => (
+            <button key={k} type="button" className={`filter-chip ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{label}</button>
+          ))}
+        </div>
+      </div>
+      {tab === "edge" && <EdgeTab list={statsList} />}
+      {tab === "dist" && <DistTab list={statsList} />}
+      {tab === "behavior" && <BehaviorTab list={statsList} />}
+      {tab === "chance" && <ChanceTab list={statsList} accountStats={accountStats} fundedStage={fundedStage} payoutCount={payoutCount} />}
+      {tab === "report" && <ReportTab list={fullList} />}
+      {tab === "heat" && <HeatTab list={fullList} />}
+    </section>
+  );
+}
+
 function StatCard({ label, value }) {
   return (
     <div className="stat-card">
@@ -3122,6 +3595,27 @@ function EquityCurve({ data }) {
   );
 }
 
+// Feldvalidierung des Trade-Formulars (rein, ohne React). Liefert { feld: Fehlertext }.
+function validateTradeForm(f, today = localIsoToday()) {
+  const err = {};
+  const num = (v) => (v === "" || v === null || v === undefined ? NaN : Number(v));
+  if (!f.trade_date) err.trade_date = T("Datum fehlt", "Date is missing");
+  else if (f.trade_date > today) err.trade_date = T("Datum liegt in der Zukunft", "Date is in the future");
+  const c = num(f.contracts);
+  if (!Number.isInteger(c) || c < 1) err.contracts = T("Ganze Zahl ab 1", "Whole number from 1");
+  const sl = num(f.stop_loss);
+  if (!Number.isFinite(sl) || sl === 0) err.stop_loss = T("Stop Loss in Punkten, nicht 0", "Stop loss in points, not 0");
+  const tp = num(f.take_profit);
+  if (!Number.isFinite(tp) || tp === 0) err.take_profit = T("Take Profit in Punkten, nicht 0", "Take profit in points, not 0");
+  if (f.manual_pnl !== "") {
+    const p = num(f.manual_pnl);
+    if (!Number.isFinite(p)) err.manual_pnl = T("Keine gültige Zahl", "Not a valid number");
+    else if (f.result === "win" && p < 0) err.manual_pnl = T("Win mit negativem PnL", "Win with negative PnL");
+    else if (f.result === "loss" && p > 0) err.manual_pnl = T("Loss mit positivem PnL", "Loss with positive PnL");
+  }
+  return err;
+}
+
 function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit = false, existingSetups = [], existingConfluences = [] }) {
   const todayIso = localIsoToday();
   const [form, setForm] = useState(() => {
@@ -3186,8 +3680,7 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
 
   // Screenshots vor dem Speichern verkleinern (max. 1600 px, JPEG 82 %): Handy-Fotos haben mehrere MB und
   // wuerden sonst bei jedem Laden mitgeladen. Bei jedem Problem wird das Original verwendet.
-  const handleFile = (e) => {
-    const file = e.target.files && e.target.files[0];
+  const processFile = (file) => {
     if (!file) return;
     const useOriginal = () => {
       const reader = new FileReader();
@@ -3212,6 +3705,23 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
     img.onerror = () => { URL.revokeObjectURL(objUrl); useOriginal(); };
     img.src = objUrl;
   };
+  const handleFile = (e) => processFile(e.target.files && e.target.files[0]);
+
+  // Bild aus der Zwischenablage (STRG+V / CMD+V) uebernehmen, solange das Formular offen ist.
+  useEffect(() => {
+    const onPaste = (e) => {
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      for (const it of items) {
+        if (it.kind === "file" && it.type.startsWith("image/")) {
+          e.preventDefault();
+          processFile(it.getAsFile());
+          return;
+        }
+      }
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, []);
 
   const addNewConfluence = () => {
     const tag = newConfluenceInput.trim();
@@ -3227,12 +3737,9 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
     }
   };
 
-  const isValid =
-    form.trade_date &&
-    form.stop_loss !== "" &&
-    form.take_profit !== "" &&
-    form.contracts !== "" &&
-    Number(form.contracts) > 0;
+  const fieldErrors = useMemo(() => validateTradeForm(form), [form]);
+  const isValid = Object.keys(fieldErrors).length === 0;
+  const fieldError = (key) => (touched && fieldErrors[key] ? <span className="field-error">{fieldErrors[key]}</span> : null);
 
   const effectivePnl = form.manual_pnl !== ""
     ? Number(form.manual_pnl)
@@ -3324,12 +3831,14 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
               <div className="field">
                 <label>{T("Datum", "Date")}</label>
                 <input type="date" ref={firstFieldRef} value={form.trade_date} onChange={set("trade_date")} />
+                {fieldError("trade_date")}
               </div>
               <div className="field">
                 <label>Contracts</label>
                 <div className="stepper">
                   <button type="button" onClick={() => bumpContracts(-1)} aria-label={T("Weniger", "Fewer")}>−</button>
                   <input type="number" min="1" step="1" value={form.contracts} onChange={set("contracts")} />
+                  {fieldError("contracts")}
                   <button type="button" onClick={() => bumpContracts(1)} aria-label={T("Mehr", "More")}>+</button>
                 </div>
               </div>
@@ -3387,10 +3896,12 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
               <div className="field">
                 <label>{T("Stop Loss (Punkte)", "Stop loss (points)")}</label>
                 <input type="number" step="any" placeholder={T("z. B. 12.5", "e.g. 12.5")} value={form.stop_loss} onChange={set("stop_loss")} />
+                {fieldError("stop_loss")}
               </div>
               <div className="field">
                 <label>{T("Take Profit (Punkte)", "Take profit (points)")}</label>
                 <input type="number" step="any" placeholder={T("z. B. 30", "e.g. 30")} value={form.take_profit} onChange={set("take_profit")} />
+                {fieldError("take_profit")}
               </div>
             </div>
 
@@ -3420,6 +3931,7 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
                 value={form.manual_pnl}
                 onChange={set("manual_pnl")}
               />
+              {fieldError("manual_pnl")}
             </div>
           </div>
 
@@ -3511,7 +4023,7 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
               ) : (
                 <label className="upload-box">
                   <Icon.Upload />
-                  <span>{T("Screenshot hochladen", "Upload screenshot")}</span>
+                  <span>{T("Screenshot hochladen oder mit STRG+V / ⌘V einfügen", "Upload a screenshot or paste it with Ctrl+V / ⌘V")}</span>
                   <input type="file" accept="image/*" onChange={handleFile} />
                 </label>
               )}
@@ -3520,7 +4032,7 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
         </div>
 
         {touched && !isValid && (
-          <span className="field-error">{T("Stop Loss, Take Profit und Contracts sind erforderlich", "Stop loss, take profit and contracts are required")}</span>
+          <span className="field-error">{T("Bitte die markierten Felder korrigieren.", "Please fix the highlighted fields.")}</span>
         )}
 
         <button type="submit" className="btn-primary btn-block" disabled={saving}>
@@ -3832,7 +4344,7 @@ function ForwardTestPanel({ onClose, trades, existingConfluences, realizedRRForT
    auf die Tabelle "Trades" des Freundes gemacht — nie schreibend.
    ============================================================ */
 const FRIENDS_LS_KEY = "journal_friends";
-const FRIEND_COLOR = "#4da3ff";
+const FRIEND_COLOR = "#a8a8a8"; // Silbergrau: hebt sich von Weiss (ich) ab, ohne den schwarz/weiss/roten Stil zu brechen
 const ME_COLOR = "#ffffff";
 const ME_NAME = T("Ich", "Me");
 
@@ -3954,11 +4466,6 @@ function summarizeTrades(list) {
 }
 
 const fmtPFValue = (v) => (v === Infinity ? "∞" : v.toFixed(2));
-// Zweispaltiges Raster (fällt auf schmalen Bildschirmen automatisch auf eine Spalte zurück)
-// Masonry-Layout: Karten fließen spaltenweise (ca. 470px breit) und füllen Lücken automatisch
-const friendsMasonry = { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", columnGap: "14px", rowGap: 0, alignItems: "stretch" };
-const friendsGrid3 = { display: "contents" };
-const friendsGrid2 = { display: "contents" };
 const friendsCard = { background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "10px", padding: "14px 16px", breakInside: "avoid", marginBottom: "14px" };
 const friendsSectionTitle = { fontSize: "11px", color: "var(--muted-light)", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: "10px", fontWeight: 700 };
 const friendsSeg = (active) => ({
@@ -4119,13 +4626,16 @@ function FriendsTradeColumn({ name, color, trades, onShot }) {
   );
 }
 
-function FriendsEquityChart({ mine, theirs, myName, theirName }) {
+function FriendsEquityChart({ mine, theirs, myName, theirName, unit = "usd" }) {
   const [hover, setHover] = useState(null);
   const W = 760, H = 230, PL = 64, PR = 16, PT = 14, PB = 28;
   const { dates, pa, pb } = useMemo(() => {
     const sum = (list) => {
       const m = new Map();
-      list.forEach((t) => m.set(t.trade_date, (m.get(t.trade_date) || 0) + Number(t.pnl || 0)));
+      list.forEach((t) => {
+        const v = unit === "r" ? (Number.isFinite(tradeRR(t)) ? tradeRR(t) : 0) : Number(t.pnl || 0);
+        m.set(t.trade_date, (m.get(t.trade_date) || 0) + v);
+      });
       return m;
     };
     const a = sum(mine), b = sum(theirs);
@@ -4134,7 +4644,7 @@ function FriendsEquityChart({ mine, theirs, myName, theirName }) {
     const A = [], B = [];
     ds.forEach((d) => { ra += a.get(d) || 0; rb += b.get(d) || 0; A.push(ra); B.push(rb); });
     return { dates: ds, pa: A, pb: B };
-  }, [mine, theirs]);
+  }, [mine, theirs, unit]);
 
   if (dates.length === 0) return <div className="notice">{T("Keine Trades im gewählten Zeitraum.", "No trades in the selected period.")}</div>;
 
@@ -4150,7 +4660,10 @@ function FriendsEquityChart({ mine, theirs, myName, theirName }) {
   const line = (arr) => arr.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   const area = (arr) => `${line(arr)} L${x(n - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
   const ticks = [0, 1, 2, 3, 4].map((k) => min + ((max - min) * k) / 4);
-  const money = (v) => `${v < 0 ? "-" : ""}$${Math.abs(Math.round(v)).toLocaleString(LOCALE)}`;
+  const money = (v) => (unit === "r"
+    ? `${v < 0 ? "-" : ""}${Math.abs(v).toFixed(1)}R`
+    : `${v < 0 ? "-" : ""}$${Math.abs(Math.round(v)).toLocaleString(LOCALE)}`);
+  const fmtU = unit === "r" ? (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}R` : fmtMoneyShort;
 
   const onMove = (e) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -4164,9 +4677,9 @@ function FriendsEquityChart({ mine, theirs, myName, theirName }) {
     <div>
       <div style={{ display: "flex", gap: "22px", flexWrap: "wrap", fontSize: "12px", color: "var(--muted-light)", marginBottom: "10px" }}>
         <span style={{ color: "#fff", fontWeight: 700 }}>{friendsDayLabel(dates[hi])}</span>
-        <span><span style={{ color: ME_COLOR }}>●</span> {myName}: <b style={{ color: "#fff" }}>{fmtMoneyShort(pa[hi])}</b></span>
-        <span><span style={{ color: FRIEND_COLOR }}>●</span> {theirName}: <b style={{ color: "#fff" }}>{fmtMoneyShort(pb[hi])}</b></span>
-        <span style={{ marginLeft: "auto" }}>{T("kumulierter PnL pro Handelstag", "cumulative PnL per trading day")}</span>
+        <span><span style={{ color: ME_COLOR }}>●</span> {myName}: <b style={{ color: "#fff" }}>{fmtU(pa[hi])}</b></span>
+        <span><span style={{ color: FRIEND_COLOR }}>●</span> {theirName}: <b style={{ color: "#fff" }}>{fmtU(pb[hi])}</b></span>
+        <span style={{ marginLeft: "auto" }}>{unit === "r" ? T("kumulierte R pro Handelstag", "cumulative R per trading day") : T("kumulierter PnL pro Handelstag", "cumulative PnL per trading day")}</span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", cursor: "crosshair" }} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         <defs>
@@ -4189,7 +4702,7 @@ function FriendsEquityChart({ mine, theirs, myName, theirName }) {
         {n > 1 && <path d={area(pa)} fill="url(#fgMe)" />}
         {n > 1 && <path d={area(pb)} fill="url(#fgThem)" />}
         <path d={line(pa)} fill="none" stroke={ME_COLOR} strokeWidth="2.2" strokeLinejoin="round" />
-        <path d={line(pb)} fill="none" stroke={FRIEND_COLOR} strokeWidth="2.2" strokeLinejoin="round" />
+        <path d={line(pb)} fill="none" stroke={FRIEND_COLOR} strokeWidth="2.2" strokeLinejoin="round" strokeDasharray="7 4" />
         <text x={PL} y={H - 8} fontSize="10" fill="#666">{dates[0]}</text>
         <text x={W - PR} y={H - 8} textAnchor="end" fontSize="10" fill="#666">{dates[n - 1]}</text>
         {hover !== null && <line x1={x(hi)} x2={x(hi)} y1={PT} y2={PT + ih} stroke="#555" />}
@@ -4392,6 +4905,285 @@ function FriendsBreakdown({ mine, theirs, myName, theirName, keyFn, order, limit
   );
 }
 
+/* ============================================================
+   FREUNDE — Uebersicht
+   Reihenfolge: Kennzahlen-Karten, automatisches Fazit, Tagesduell,
+   Equity ($ oder R), Vergleichstabelle in Abschnitten, Aufschluesselungen.
+   ============================================================ */
+const fmtPFSafe = (v) => (Number.isNaN(v) ? "—" : fmtPFValue(v));
+const nanIfNull = (v) => (v === null || v === undefined ? NaN : v);
+
+// Kennzahlen je Person: Zusammenfassung, Edge-Werte, Netto-R und Plan-Disziplin.
+function friendsMetrics(list) {
+  const sum = summarizeTrades(list);
+  const edge = computeEdgeStats(list);
+  const rs = finiteNums(list.map(tradeRR));
+  const planKnown = list.filter((t) => t.plan_followed === true || t.plan_followed === false);
+  return {
+    sum,
+    edge,
+    wins: list.filter((t) => t.result === "win").length,
+    netR: rs.reduce((s, v) => s + v, 0),
+    rN: rs.length,
+    planN: planKnown.length,
+    noPlanShare: planKnown.length ? planKnown.filter((t) => t.plan_followed === false).length / planKnown.length : null,
+  };
+}
+
+// Automatisches Fazit. Jede Aussage nennt Zahlen, und Unterschiede werden nur dann als belastbar
+// bezeichnet, wenn sich die 95%-Intervalle der Winrate nicht ueberlappen.
+function friendsTakeaways(A, B, myName, theirName) {
+  const out = [];
+  if (!A.sum.count || !B.sum.count) return out;
+  const who = (d) => (d > 0 ? myName : theirName);
+  // Grammatik: "bei mir" / "für mich" statt "bei Ich" / "für Ich"; Namen bleiben unveraendert.
+  const dat = (n) => (n === myName ? T("mir", "me") : n);
+  const acc = (n) => (n === myName ? T("mich", "me") : n);
+
+  const dUsd = A.sum.pnl - B.sum.pnl;
+  if (dUsd !== 0) {
+    out.push({
+      key: "result",
+      text: T(
+        `Ergebnis: ${fmtMoney(Math.abs(dUsd))} Vorsprung für ${acc(who(dUsd))} (${myName} ${fmtMoneyShort(A.sum.pnl)}, ${theirName} ${fmtMoneyShort(B.sum.pnl)}). In R: ${fmtR(A.netR)} gegen ${fmtR(B.netR)}. Das ist der fairere Vergleich, falls ihr verschieden viele Contracts handelt.`,
+        `Result: ${fmtMoney(Math.abs(dUsd))} lead for ${acc(who(dUsd))} (${myName} ${fmtMoneyShort(A.sum.pnl)}, ${theirName} ${fmtMoneyShort(B.sum.pnl)}). In R: ${fmtR(A.netR)} vs ${fmtR(B.netR)}. That is the fairer comparison if you trade different contract sizes.`
+      ),
+    });
+  }
+
+  if (A.rN >= 5 && B.rN >= 5 && A.edge.expR !== B.edge.expR) {
+    const hi = A.edge.expR > B.edge.expR ? A : B;
+    const lo = hi === A ? B : A;
+    out.push({
+      key: "edge",
+      text: T(
+        `Edge pro Trade: ${fmtR(hi.edge.expR)} bei ${dat(hi === A ? myName : theirName)}, ${fmtR(lo.edge.expR)} bei ${dat(hi === A ? theirName : myName)}.`,
+        `Edge per trade: ${fmtR(hi.edge.expR)} for ${dat(hi === A ? myName : theirName)}, ${fmtR(lo.edge.expR)} for ${dat(hi === A ? theirName : myName)}.`
+      ),
+    });
+  }
+
+  const nA = A.edge.decided, nB = B.edge.decided;
+  if (nA > 0 && nB > 0) {
+    const wa = wilsonInterval(A.wins, nA), wb = wilsonInterval(B.wins, nB);
+    const overlap = wa.low <= wb.high && wb.low <= wa.high;
+    const pa = `${(wa.p * 100).toFixed(0)}%`, pb = `${(wb.p * 100).toFixed(0)}%`;
+    out.push({
+      key: "winrate",
+      text: overlap
+        ? T(`Winrate ${pa} gegen ${pb}: Die Intervalle überlappen, bei dieser Stichprobe ist der Unterschied nicht belastbar.`, `Win rate ${pa} vs ${pb}: the intervals overlap, so the difference is not reliable at this sample size.`)
+        : T(`Winrate ${pa} gegen ${pb}: Die Intervalle überlappen nicht, der Unterschied ist belastbar.`, `Win rate ${pa} vs ${pb}: the intervals do not overlap, the difference is reliable.`),
+    });
+  }
+
+  if ((A.sum.maxDD > 0 || B.sum.maxDD > 0) && A.sum.maxDD !== B.sum.maxDD) {
+    const low = A.sum.maxDD < B.sum.maxDD ? A : B;
+    const high = low === A ? B : A;
+    out.push({
+      key: "dd",
+      text: T(
+        `Risiko: kleinerer Max Drawdown bei ${dat(low === A ? myName : theirName)} (${fmtMoney(-low.sum.maxDD)} gegen ${fmtMoney(-high.sum.maxDD)}).`,
+        `Risk: smaller max drawdown for ${dat(low === A ? myName : theirName)} (${fmtMoney(-low.sum.maxDD)} vs ${fmtMoney(-high.sum.maxDD)}).`
+      ),
+    });
+  }
+
+  if (A.noPlanShare !== null && B.noPlanShare !== null && A.planN >= 5 && B.planN >= 5 && Math.abs(A.noPlanShare - B.noPlanShare) >= 0.1) {
+    out.push({
+      key: "plan",
+      text: T(
+        `Disziplin: Trades ohne Plan machen bei ${dat(myName)} ${(A.noPlanShare * 100).toFixed(0)}% aus, bei ${theirName} ${(B.noPlanShare * 100).toFixed(0)}%.`,
+        `Discipline: trades without a plan are ${(A.noPlanShare * 100).toFixed(0)}% for ${dat(myName)} and ${(B.noPlanShare * 100).toFixed(0)}% for ${theirName}.`
+      ),
+    });
+  }
+
+  if (Math.min(nA, nB) < SMALL_SAMPLE) {
+    out.push({
+      key: "sample",
+      warn: true,
+      text: T(
+        `Kleine Stichprobe (${myName} ${nA}, ${theirName} ${nB} Trades mit Ergebnis, unter ${SMALL_SAMPLE}): Zahlen mit Vorsicht lesen.`,
+        `Small sample (${myName} ${nA}, ${theirName} ${nB} decided trades, under ${SMALL_SAMPLE}): read the numbers with care.`
+      ),
+    });
+  }
+  return out;
+}
+
+function FriendsOverview({ myName, theirName, mine, theirs, duel }) {
+  const [unit, setUnit] = useState("usd");
+  const A = useMemo(() => friendsMetrics(mine), [mine]);
+  const B = useMemo(() => friendsMetrics(theirs), [theirs]);
+  const diff = A.sum.pnl - B.sum.pnl;
+  const takeaways = useMemo(() => friendsTakeaways(A, B, myName, theirName), [A, B, myName, theirName]);
+  const hasTime = useMemo(() => [...mine, ...theirs].some((t) => /^\d{1,2}:\d{2}/.test(t.entry_time || "")), [mine, theirs]);
+
+  const pct = (v) => (Number.isFinite(v) ? `${v.toFixed(0)}%` : "—");
+  const share = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : "—");
+  const sections = [
+    {
+      title: T("Ergebnis", "Result"),
+      rows: [
+        { label: "Trades", a: A.sum.count, b: B.sum.count, fmt: String, better: null },
+        { label: T("Netto PnL", "Net PnL"), a: A.sum.pnl, b: B.sum.pnl, fmt: fmtMoneyShort, better: "high" },
+        { label: T("Netto R", "Net R"), a: A.rN ? A.netR : NaN, b: B.rN ? B.netR : NaN, fmt: fmtR, better: "high" },
+        { label: T("Handelstage", "Trading days"), a: A.sum.dayCount, b: B.sum.dayCount, fmt: String, better: null },
+        { label: T("Grüne Tage", "Green days"), a: A.sum.greenDayPct, b: B.sum.greenDayPct, fmt: pct, better: "high" },
+        { label: T("Bester Tag", "Best day"), a: A.sum.bestDay, b: B.sum.bestDay, fmt: fmtMoneyShort, better: "high" },
+        { label: T("Schlechtester Tag", "Worst day"), a: A.sum.worstDay, b: B.sum.worstDay, fmt: fmtMoneyShort, better: "high" },
+      ],
+    },
+    {
+      title: T("Qualität", "Quality"),
+      rows: [
+        {
+          label: "Winrate", a: A.sum.winrate, b: B.sum.winrate, fmt: pct, better: "high",
+          subA: A.edge.decided ? `95%: ${fmtCI(A.wins, A.edge.decided)}` : null,
+          subB: B.edge.decided ? `95%: ${fmtCI(B.wins, B.edge.decided)}` : null,
+        },
+        { label: "Profit Factor", a: A.sum.profitFactor, b: B.sum.profitFactor, fmt: fmtPFSafe, better: "high" },
+        { label: "Expectancy / Trade", a: A.sum.expectancy, b: B.sum.expectancy, fmt: fmtMoneyShort, better: "high" },
+        { label: T("Expectancy (R)", "Expectancy (R)"), a: A.rN ? A.edge.expR : NaN, b: B.rN ? B.edge.expR : NaN, fmt: fmtR, better: "high" },
+        { label: "SQN", a: nanIfNull(A.edge.sqn), b: nanIfNull(B.edge.sqn), fmt: (v) => (Number.isFinite(v) ? v.toFixed(2) : "—"), better: "high" },
+        { label: T("Payoff (Ø Win / Ø Loss)", "Payoff (avg win / avg loss)"), a: A.sum.payoff, b: B.sum.payoff, fmt: fmtPFSafe, better: "high" },
+        { label: T("Ø Gewinn / Win", "Avg profit / win"), a: A.sum.avgWin, b: B.sum.avgWin, fmt: fmtMoneyShort, better: "high" },
+        { label: T("Ø Verlust / Loss", "Avg loss / loss"), a: A.sum.avgLoss, b: B.sum.avgLoss, fmt: fmtMoneyShort, better: "high" },
+      ],
+    },
+    {
+      title: T("Risiko", "Risk"),
+      rows: [
+        { label: "Max Drawdown (PnL)", a: A.sum.maxDD, b: B.sum.maxDD, fmt: (v) => fmtMoney(-v), better: "low" },
+        { label: T("Längste Loss-Streak", "Longest loss streak"), a: A.sum.maxLossStreak, b: B.sum.maxLossStreak, fmt: (v) => `${v}×`, better: "low" },
+        { label: T("Ø Risiko / Trade", "Avg risk / trade"), a: A.edge.riskN ? A.edge.avgRisk : NaN, b: B.edge.riskN ? B.edge.avgRisk : NaN, fmt: fmtMoney, better: null },
+      ],
+    },
+    {
+      title: T("Verhalten", "Behavior"),
+      rows: [
+        { label: T("Ohne-Plan-Anteil", "No-plan share"), a: nanIfNull(A.noPlanShare), b: nanIfNull(B.noPlanShare), fmt: share, better: "low" },
+        { label: T("Längste Win-Streak", "Longest win streak"), a: A.sum.maxWinStreak, b: B.sum.maxWinStreak, fmt: (v) => `${v}×`, better: "high" },
+        { label: T("Trades pro Handelstag", "Trades per trading day"), a: A.sum.tradesPerDay, b: B.sum.tradesPerDay, fmt: (v) => v.toFixed(1), better: null },
+      ],
+    },
+  ];
+
+  const cell = (r, side, color) => {
+    const v = side === "a" ? r.a : r.b;
+    const other = side === "a" ? r.b : r.a;
+    const sub = side === "a" ? r.subA : r.subB;
+    const none = Number.isNaN(v);
+    const better = !none && !Number.isNaN(other) && (r.better === "high" ? v > other : r.better === "low" ? v < other : false);
+    const finiteVals = [r.a, r.b].filter(Number.isFinite).map(Math.abs);
+    const mx = Math.max(1e-9, ...finiteVals);
+    const width = none ? 0 : Number.isFinite(v) ? Math.min(100, (Math.abs(v) / mx) * 100) : 100;
+    return (
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px", fontSize: "13px", fontWeight: better ? 700 : 400, color: better ? "#fff" : "var(--muted-light)" }}>
+          <span>{none ? "—" : r.fmt(v)}{sub ? <span style={{ fontSize: "10.5px", color: "var(--muted)", fontWeight: 400, marginLeft: 8 }}>{sub}</span> : null}</span>
+          {better && <span style={{ fontSize: "10px", color }}>▲</span>}
+        </div>
+        <div style={{ height: "5px", background: "#1a1a1a", borderRadius: "3px", overflow: "hidden" }}>
+          <div style={{ width: `${width}%`, height: "100%", background: color, opacity: better ? 1 : 0.45, borderRadius: "3px" }} />
+        </div>
+      </div>
+    );
+  };
+
+  const card = (title, node) => (
+    <div style={{ ...friendsCard, marginBottom: 0 }}>
+      <div style={friendsSectionTitle}>{title}</div>
+      {node}
+    </div>
+  );
+  const bd = (keyFn, extra = {}) => (
+    <FriendsBreakdown mine={mine} theirs={theirs} myName={myName} theirName={theirName} keyFn={keyFn} {...extra} />
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+        <FriendsHeroCard name={myName} color={ME_COLOR} sum={A.sum} leading={diff > 0} />
+        <FriendsHeroCard name={theirName} color={FRIEND_COLOR} sum={B.sum} leading={diff < 0} />
+      </div>
+
+      {takeaways.length > 0 && (
+        <div style={{ ...friendsCard, marginBottom: 0 }}>
+          <div style={friendsSectionTitle}>{T("Fazit", "Takeaways")}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "9px" }}>
+            {takeaways.map((t) => (
+              <div key={t.key} style={{ display: "flex", gap: "10px", fontSize: "12.5px", lineHeight: 1.6, color: t.warn ? "#ff6b78" : "var(--text)" }}>
+                <span style={{ color: t.warn ? "var(--red)" : "var(--muted)", flexShrink: 0 }}>●</span>
+                <span>{t.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {duel.total > 0 && (
+        <div style={{ ...friendsCard, marginBottom: 0 }}>
+          <div style={friendsSectionTitle}>{T(`Tagesduell · ${duel.total} gemeinsame Handelstage`, `Daily duel · ${duel.total} shared trading days`)}</div>
+          <div style={{ display: "flex", height: "10px", borderRadius: "5px", overflow: "hidden", background: "#1a1a1a" }}>
+            <div style={{ width: `${(duel.w / duel.total) * 100}%`, background: ME_COLOR }} />
+            <div style={{ width: `${(duel.t / duel.total) * 100}%`, background: "#444" }} />
+            <div style={{ width: `${(duel.l / duel.total) * 100}%`, background: FRIEND_COLOR }} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "10px", fontSize: "12px" }}>
+            <span style={{ color: ME_COLOR }}>{myName} {T("besser:", "ahead:")} <b>{duel.w}</b></span>
+            <span style={{ color: "var(--muted-light)" }}>{T("Gleichstand:", "Tie:")} <b>{duel.t}</b></span>
+            <span style={{ color: FRIEND_COLOR }}>{theirName} {T("besser:", "ahead:")} <b>{duel.l}</b></span>
+          </div>
+        </div>
+      )}
+
+      <div style={{ ...friendsCard, marginBottom: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "10px" }}>
+          <div style={{ ...friendsSectionTitle, marginBottom: 0 }}>{T("Equity-Vergleich", "Equity comparison")}</div>
+          <div style={{ display: "flex", gap: "6px" }}>
+            {[["usd", "$"], ["r", "R"]].map(([id, label]) => (
+              <button key={id} type="button" style={friendsSeg(unit === id)} onClick={() => setUnit(id)}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <FriendsEquityChart mine={mine} theirs={theirs} myName={myName} theirName={theirName} unit={unit} />
+      </div>
+
+      <div style={{ ...friendsCard, marginBottom: 0 }}>
+        <div style={friendsSectionTitle}>{T("Vergleichstabelle", "Comparison table")}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "210px 1fr 1fr", gap: "22px", paddingBottom: "8px", borderBottom: "1px solid var(--line)" }}>
+          <span />
+          <span style={{ color: ME_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{myName}</span>
+          <span style={{ color: FRIEND_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{theirName}</span>
+        </div>
+        {sections.map((sec) => (
+          <React.Fragment key={sec.title}>
+            <div style={{ ...friendsLabel, padding: "16px 0 6px", color: "var(--muted-light)" }}>{sec.title}</div>
+            {sec.rows.map((r) => (
+              <div key={r.label} style={{ display: "grid", gridTemplateColumns: "210px 1fr 1fr", gap: "22px", alignItems: "center", padding: "9px 0", borderBottom: "1px solid var(--line)" }}>
+                <span style={{ fontSize: "12px", color: "var(--muted-light)" }}>{r.label}</span>
+                {cell(r, "a", ME_COLOR)}
+                {cell(r, "b", FRIEND_COLOR)}
+              </div>
+            ))}
+          </React.Fragment>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(440px, 1fr))", gap: "14px", alignItems: "start" }}>
+        {card(T("Nach Wochentag", "By weekday"), bd(friendsWeekdayKey, { order: WEEKDAY_FULL }))}
+        {card(T("Nach Setup", "By setup"), bd((t) => t.setup || null))}
+        {card(T("Nach Confluence (Top 8)", "By confluence (top 8)"), bd((t) => (Array.isArray(t.confluences) ? t.confluences : []), { limit: 8 }))}
+        {card(T("Nach Markt (Mini + Micro zusammen)", "By market (mini + micro combined)"), bd((t) => (t.symbol ? marketOf(t.symbol) : null)))}
+        {card(T("Nach Richtung", "By direction"), bd((t) => (t.direction === "long" ? "Long" : t.direction === "short" ? "Short" : null)))}
+        {hasTime && card(T("Nach Uhrzeit (Einstieg)", "By hour (entry)"), bd((t) => { const m = /^(\d{1,2}):/.exec(t.entry_time || ""); return m ? `${m[1].padStart(2, "0")}:00` : null; }, { chrono: true }))}
+        {card(T("Nach Monat", "By month"), bd((t) => (t.trade_date ? t.trade_date.slice(0, 7) : null), { chrono: true }))}
+      </div>
+    </div>
+  );
+}
+
 function FriendsPanel({ onClose, myTrades }) {
   const [friends, setFriends] = useState(loadFriendsLS);
   const [activeId, setActiveId] = useState(() => { const l = loadFriendsLS(); return l[0] ? l[0].id : null; });
@@ -4418,6 +5210,7 @@ function FriendsPanel({ onClose, myTrades }) {
   const [commonOnly, setCommonOnly] = useState(false);
   const [lastN, setLastN] = useState("all");
   const [curAcc, setCurAcc] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // Gespeicherte Filter-Ansichten (pro Profil im Browser)
   const viewsKey = `journal_friends_views__${ACTIVE_PROFILE ? ACTIVE_PROFILE.id : "x"}`;
   const [views, setViews] = useState(() => {
@@ -4651,27 +5444,6 @@ function FriendsPanel({ onClose, myTrades }) {
     });
   };
 
-  const fmtPF = fmtPFValue;
-  const rows = [
-    { label: "Trades", a: mySum.count, b: theirSum.count, fmt: (v) => String(v), better: null },
-    { label: T("Netto PnL", "Net PnL"), a: mySum.pnl, b: theirSum.pnl, fmt: fmtMoneyShort, better: "high" },
-    { label: "Winrate", a: mySum.winrate, b: theirSum.winrate, fmt: (v) => `${v.toFixed(0)}%`, better: "high" },
-    { label: "Profit Factor", a: mySum.profitFactor, b: theirSum.profitFactor, fmt: fmtPF, better: "high" },
-    { label: T("Ø RR (realisiert)", "Ø RR (realized)"), a: mySum.avgRR, b: theirSum.avgRR, fmt: (v) => `${v.toFixed(2)}R`, better: "high" },
-    { label: "Expectancy / Trade", a: mySum.expectancy, b: theirSum.expectancy, fmt: fmtMoneyShort, better: "high" },
-    { label: T("Handelstage", "Trading days"), a: mySum.dayCount, b: theirSum.dayCount, fmt: (v) => String(v), better: null },
-    { label: T("Grüne Tage", "Green days"), a: mySum.greenDayPct, b: theirSum.greenDayPct, fmt: (v) => `${v.toFixed(0)}%`, better: "high" },
-    { label: T("Bester Tag", "Best day"), a: mySum.bestDay, b: theirSum.bestDay, fmt: fmtMoneyShort, better: "high" },
-    { label: T("Schlechtester Tag", "Worst day"), a: mySum.worstDay, b: theirSum.worstDay, fmt: fmtMoneyShort, better: "high" },
-    { label: "Max Drawdown (PnL)", a: mySum.maxDD, b: theirSum.maxDD, fmt: (v) => fmtMoney(-v), better: "low" },
-    { label: T("Ø Gewinn / Win", "Ø Profit / Win"), a: mySum.avgWin, b: theirSum.avgWin, fmt: fmtMoneyShort, better: "high" },
-    { label: T("Ø Verlust / Loss", "Ø Loss / Loss"), a: mySum.avgLoss, b: theirSum.avgLoss, fmt: fmtMoneyShort, better: "high" },
-    { label: "Payoff (Ø Win / Ø Loss)", a: mySum.payoff, b: theirSum.payoff, fmt: fmtPF, better: "high" },
-    { label: T("Längste Win-Streak", "Longest win streak"), a: mySum.maxWinStreak, b: theirSum.maxWinStreak, fmt: (v) => `${v}×`, better: "high" },
-    { label: T("Längste Loss-Streak", "Longest loss streak"), a: mySum.maxLossStreak, b: theirSum.maxLossStreak, fmt: (v) => `${v}×`, better: "low" },
-    { label: T("Trades pro Handelstag", "Trades per trading day"), a: mySum.tradesPerDay, b: theirSum.tradesPerDay, fmt: (v) => v.toFixed(1), better: null },
-  ];
-
   const inputStyle = {
     background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "6px", color: "var(--text)",
     padding: "10px 12px", fontSize: "13px", fontFamily: "'JetBrains Mono', monospace", width: "100%",
@@ -4695,7 +5467,7 @@ function FriendsPanel({ onClose, myTrades }) {
 
   const pillStyle = (sel) => ({
     display: "flex", alignItems: "center", gap: "8px",
-    background: sel ? "rgba(77,163,255,0.10)" : "transparent",
+    background: sel ? "rgba(255,255,255,0.08)" : "transparent",
     border: `1px solid ${sel ? FRIEND_COLOR : "var(--line)"}`,
     color: sel ? "#fff" : "var(--muted-light)",
     borderRadius: "999px", padding: "6px 16px 6px 6px", cursor: "pointer",
@@ -4807,6 +5579,27 @@ function FriendsPanel({ onClose, myTrades }) {
                 </div>
               )}
 
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                <button type="button" style={friendsSeg(filtersOpen)} onClick={() => setFiltersOpen((v) => !v)}>
+                  {filtersOpen ? "▾" : "▸"} {T("Filter", "Filters")}{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+                </button>
+                {views.map((v) => (
+                  <button key={v.name} type="button" style={friendsSeg(false)} onClick={() => loadView(v)} title={T("Gespeicherte Filter-Ansicht laden", "Load saved filter view")}>{v.name}</button>
+                ))}
+                <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "12px", fontSize: "11px", color: "var(--muted-light)" }}>
+                  <span>{myFiltered.length} / {theirFiltered.length} Trades</span>
+                  {activeFilterCount > 0 && (
+                    <button type="button" style={{ ...friendsSeg(false), color: "#ff6b78", borderColor: "rgba(224,0,26,0.5)" }} onClick={resetFilters}>
+                      {T("Zurücksetzen", "Reset")} ({activeFilterCount})
+                    </button>
+                  )}
+                  <button type="button" style={friendsSeg(false)} onClick={exportCsv} title={T("Gefilterte Trades beider Personen als CSV herunterladen", "Download the filtered trades of both people as CSV")}>
+                    {T("CSV exportieren", "Export CSV")}
+                  </button>
+                </span>
+              </div>
+
+              {filtersOpen && (
               <div style={{ ...friendsCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: "12px" }}>
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                   <span style={friendsLabel}>Phase</span>
@@ -4834,14 +5627,6 @@ function FriendsPanel({ onClose, myTrades }) {
                   <button type="button" style={friendsSeg(commonOnly)} onClick={() => setCommonOnly((v) => !v)} title={T("Nur Tage vergleichen, an denen beide gehandelt haben", "Only compare days on which both traded")}>
                     {T("Nur gemeinsame Handelstage", "Shared trading days only")}
                   </button>
-                  <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "12px", fontSize: "11px", color: "var(--muted-light)" }}>
-                    <span>{myFiltered.length} / {theirFiltered.length} Trades</span>
-                    {activeFilterCount > 0 && (
-                      <button type="button" style={{ ...friendsSeg(false), color: "#ff6b78", borderColor: "rgba(224,0,26,0.5)" }} onClick={resetFilters}>
-                        {T("Zurücksetzen", "Reset")} ({activeFilterCount})
-                      </button>
-                    )}
-                  </span>
                 </div>
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", borderTop: "1px dashed var(--line)", paddingTop: "12px" }}>
                   <span style={friendsLabel}>{T("Ansichten", "Views")}</span>
@@ -4852,7 +5637,6 @@ function FriendsPanel({ onClose, myTrades }) {
                       <button type="button" style={{ ...friendsSeg(false), borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: "none", padding: "7px 9px", color: "var(--muted)" }} onClick={() => deleteView(v)} aria-label={T(`Ansicht ${v.name} löschen`, `Delete view ${v.name}`)}>✕</button>
                     </span>
                   ))}
-                  <button type="button" style={{ ...friendsSeg(false), marginLeft: "auto" }} onClick={exportCsv} title={T("Gefilterte Trades beider Personen als CSV herunterladen", "Download the filtered trades of both people as CSV")}>CSV Export</button>
                 </div>
                 <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", borderTop: "1px dashed var(--line)", paddingTop: "12px" }}>
                   <span style={friendsLabel}>{T("Konto", "Account")}</span>
@@ -4898,6 +5682,7 @@ function FriendsPanel({ onClose, myTrades }) {
                   </div>
                 )}
               </div>
+              )}
 
               {fLoading && <div className="notice">{T(`Lade Trades von ${active.name}…`, `Loading trades from ${active.name}…`)}</div>}
               {fErr && <div className="notice notice-error">{fErr}</div>}
@@ -4906,107 +5691,7 @@ function FriendsPanel({ onClose, myTrades }) {
               )}
 
               {!fLoading && !fErr && tab === "overview" && (
-                <React.Fragment>
-                  <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
-                    <FriendsHeroCard name={ME_NAME} color={ME_COLOR} sum={mySum} leading={diff > 0} />
-                    <FriendsHeroCard name={active.name} color={FRIEND_COLOR} sum={theirSum} leading={diff < 0} />
-                  </div>
-                  {diff !== 0 && (
-                    <div style={{ textAlign: "center", fontSize: "12px", color: "var(--muted-light)" }}>
-                      {diff > 0 ? T("Du liegst ", "You are ") : T(`${active.name} liegt `, `${active.name} is `)}
-                      <b style={{ color: "#fff" }}>{fmtMoney(Math.abs(diff))}</b>
-                      {diff > 0 ? T(` vor ${active.name}`, ` ahead of ${active.name}`) : T(" vor dir", " ahead of you")}
-                    </div>
-                  )}
-
-                  <div style={friendsMasonry}>
-                  {duel.total > 0 && (
-                    <div style={{ ...friendsCard, gridColumn: "1 / -1", gridRow: 1 }}>
-                      <div style={friendsSectionTitle}>{T(`Tagesduell · ${duel.total} gemeinsame Handelstage`, `Daily duel · ${duel.total} shared trading days`)}</div>
-                      <div style={{ display: "flex", height: "10px", borderRadius: "5px", overflow: "hidden", background: "#1a1a1a" }}>
-                        <div style={{ width: `${(duel.w / duel.total) * 100}%`, background: ME_COLOR }} />
-                        <div style={{ width: `${(duel.t / duel.total) * 100}%`, background: "#444" }} />
-                        <div style={{ width: `${(duel.l / duel.total) * 100}%`, background: FRIEND_COLOR }} />
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "10px", fontSize: "12px" }}>
-                        <span style={{ color: ME_COLOR }}>{T("Ich besser:", "Me ahead:")} <b>{duel.w}</b></span>
-                        <span style={{ color: "var(--muted-light)" }}>{T("Gleichstand:", "Tie:")} <b>{duel.t}</b></span>
-                        <span style={{ color: FRIEND_COLOR }}>{active.name} {T("besser:", "ahead:")} <b>{duel.l}</b></span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div style={friendsGrid2}>
-                  <div style={{ ...friendsCard, gridColumn: 1, gridRow: 2 }}>
-                    <div style={friendsSectionTitle}>{T("Equity-Vergleich", "Equity comparison")}</div>
-                    <FriendsEquityChart mine={myFiltered} theirs={theirFiltered} myName={ME_NAME} theirName={active.name} />
-                  </div>
-
-                  <div style={{ ...friendsCard, gridColumn: "1 / span 2", gridRow: 3 }}>
-                    <div style={friendsSectionTitle}>{T("Statistiken", "Statistics")}</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "190px 1fr 1fr", gap: "22px", paddingBottom: "8px", borderBottom: "1px solid var(--line)" }}>
-                      <span />
-                      <span style={{ color: ME_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{ME_NAME}</span>
-                      <span style={{ color: FRIEND_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{active.name}</span>
-                    </div>
-                    {rows.map((r) => {
-                      const finite = (v) => Number.isFinite(v);
-                      const mx = Math.max(1e-9, ...[r.a, r.b].filter(finite).map((v) => Math.abs(v)));
-                      const wd = (v) => (!finite(v) ? 100 : Math.min(100, (Math.abs(v) / mx) * 100));
-                      const aBetter = r.better === "high" ? r.a > r.b : r.better === "low" ? r.a < r.b : false;
-                      const bBetter = r.better === "high" ? r.b > r.a : r.better === "low" ? r.b < r.a : false;
-                      const cell = (v, better, color) => (
-                        <div>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px", fontSize: "13px", fontWeight: better ? 700 : 400, color: better ? "#fff" : "var(--muted-light)" }}>
-                            <span>{r.fmt(v)}</span>
-                            {better && <span style={{ fontSize: "10px", color }}>▲</span>}
-                          </div>
-                          <div style={{ height: "5px", background: "#1a1a1a", borderRadius: "3px", overflow: "hidden" }}>
-                            <div style={{ width: `${wd(v)}%`, height: "100%", background: color, opacity: better ? 1 : 0.45, borderRadius: "3px" }} />
-                          </div>
-                        </div>
-                      );
-                      return (
-                        <div key={r.label} style={{ display: "grid", gridTemplateColumns: "190px 1fr 1fr", gap: "22px", alignItems: "center", padding: "11px 0", borderBottom: "1px solid var(--line)" }}>
-                          <span style={{ fontSize: "12px", color: "var(--muted-light)" }}>{r.label}</span>
-                          {cell(r.a, aBetter, ME_COLOR)}
-                          {cell(r.b, bBetter, FRIEND_COLOR)}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  </div>
-
-                  <div style={friendsGrid3}>
-                  <div style={{ ...friendsCard, gridColumn: 2, gridRow: 2 }}>
-                    <div style={friendsSectionTitle}>{T("Nach Wochentag", "By weekday")}</div>
-                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName={ME_NAME} theirName={active.name} keyFn={friendsWeekdayKey} order={WEEKDAY_FULL} />
-                  </div>
-
-                  <div style={{ gridColumn: 3, gridRow: "2 / span 2", display: "flex", flexDirection: "column" }}>
-                  <div style={{ ...friendsCard, flex: "1 1 auto" }}>
-                    <div style={friendsSectionTitle}>{T("Nach Markt (Mini + Micro zusammen)", "By market (mini + micro combined)")}</div>
-                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName={ME_NAME} theirName={active.name} keyFn={(t) => (t.symbol ? marketOf(t.symbol) : null)} />
-                  </div>
-
-                  <div style={{ ...friendsCard, flex: "1 1 auto" }}>
-                    <div style={friendsSectionTitle}>{T("Nach Richtung", "By direction")}</div>
-                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName={ME_NAME} theirName={active.name} keyFn={(t) => (t.direction === "long" ? "Long" : t.direction === "short" ? "Short" : null)} order={["Long", "Short"]} />
-                  </div>
-
-                  <div style={{ ...friendsCard, flex: "1 1 auto" }}>
-                    <div style={friendsSectionTitle}>{T("Nach Monat", "By month")}</div>
-                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName={ME_NAME} theirName={active.name} keyFn={(t) => (t.trade_date ? t.trade_date.slice(0, 7) : null)} chrono />
-                  </div>
-
-                  <div style={{ ...friendsCard, order: -1, flex: "1 1 auto" }}>
-                    <div style={friendsSectionTitle}>{T("Nach Confluence (Top 5)", "By confluence (top 5)")}</div>
-                    <FriendsBreakdown mine={myFiltered} theirs={theirFiltered} myName={ME_NAME} theirName={active.name} keyFn={(t) => (Array.isArray(t.confluences) ? t.confluences : [])} limit={5} />
-                  </div>
-                  </div>
-                  </div>
-                  </div>
-                </React.Fragment>
+                <FriendsOverview myName={ME_NAME} theirName={active.name} mine={myFiltered} theirs={theirFiltered} duel={duel} />
               )}
 
               {!fLoading && !fErr && tab === "calendar" && (
