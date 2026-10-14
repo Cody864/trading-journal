@@ -10,10 +10,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black" />
 <link rel="apple-touch-icon" href="sharingan.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" />
 <title>Trading Journal</title>
 <link rel="icon" type="image/x-icon" href="sharingan.png">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
 
   :root {
     --bg: #000000;
@@ -442,6 +444,7 @@
   }
   .confluence-chip:hover { border-color: var(--muted-light); color: var(--text); }
   .confluence-chip.active { background: rgba(46,204,113,0.12); border-color: #2ecc71; color: #2ecc71; }
+  .confluence-chip.implied { border-style: dashed; border-color: rgba(46,204,113,0.5); color: #6fdb9a; background: rgba(46,204,113,0.04); }
   .confluence-add-row { display: flex; gap: 8px; margin-top: 4px; }
   .confluence-add-row input {
     flex: 1; background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
@@ -645,8 +648,48 @@ if (ACTIVE_PROFILE) {
       } catch {}
     });
   }
+  // ── Sync ueber Supabase (Tabelle "Settings", SQL siehe unten im Kommentar) ──
+  // Funded Stage, Start-Datum, Aktivierungs-Zeitpunkt und Payout-Log lagen bisher nur im Browser des
+  // Geraets, auf dem sie gesetzt wurden (Handy startete deshalb immer in der Eval Stage). Jetzt werden
+  // sie zusaetzlich in der Datenbank gespeichert und beim Start geladen. Die Datenbank gewinnt; nur wenn
+  // dort noch nichts steht, wird der lokale Wert hochgeladen. Fehlt die Tabelle, bleibt alles lokal.
+  const SYNC_KEYS = ["journal_funded_stage", "journal_funded_start_date", "journal_funded_activated_at", "journal_funded_payouts", "journal_funded_last_payout"];
+  const settingsOn = !String(ACTIVE_PROFILE.url).includes("DEIN-PROJEKT") && !String(ACTIVE_PROFILE.key).includes("DEIN-ANON-KEY");
+  const SETTINGS_URL = `${String(ACTIVE_PROFILE.url).replace(/\/+$/, "")}/rest/v1/Settings`;
+  const sbH = { apikey: ACTIVE_PROFILE.key, Authorization: `Bearer ${ACTIVE_PROFILE.key}`, "Content-Type": "application/json" };
+  const pushSetting = (k, v) => {
+    if (!settingsOn) return;
+    fetch(`${SETTINGS_URL}?on_conflict=key`, {
+      method: "POST",
+      headers: { ...sbH, Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ key: k, value: v, updated_at: new Date().toISOString() }),
+    }).catch(() => {});
+  };
   Storage.prototype.getItem = function (k) { return rawGet.call(this, nsKey(k)); };
-  Storage.prototype.setItem = function (k, v) { return rawSet.call(this, nsKey(k), v); };
+  Storage.prototype.setItem = function (k, v) {
+    const r = rawSet.call(this, nsKey(k), v);
+    if (this === window.localStorage && SYNC_KEYS.includes(k)) pushSetting(k, v);
+    return r;
+  };
+  window.__settingsReady = (async () => {
+    if (!settingsOn) return;
+    try {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 4000);
+      const res = await fetch(`${SETTINGS_URL}?select=key,value`, { headers: sbH, signal: ctrl.signal });
+      clearTimeout(to);
+      if (!res.ok) return; // Tabelle fehlt -> nur lokal
+      const remote = {};
+      (await res.json()).forEach((r) => { remote[r.key] = r.value; });
+      SYNC_KEYS.forEach((k) => {
+        if (remote[k] !== undefined && remote[k] !== null) rawSet.call(localStorage, nsKey(k), remote[k]);
+        else {
+          const local = rawGet.call(localStorage, nsKey(k));
+          if (local !== null) pushSetting(k, local);
+        }
+      });
+    } catch {}
+  })();
 }
 
 const SUPABASE_URL = ACTIVE_PROFILE ? ACTIVE_PROFILE.url : "";
@@ -684,6 +727,15 @@ const FUNDED_BALANCE_OVERRIDE =
    Ebenfalls optional: Spalte "plan_followed" (Typ: boolean, nullable) fuer "Mit Plan / Ohne Plan".
    Ohne diese Spalte wird die Plan-Angabe NICHT gespeichert (es erscheint eine Warnung):
    ALTER TABLE "Trades" ADD COLUMN plan_followed boolean;
+
+   Fuer geraeteuebergreifende Funded-Stage-Einstellungen (Handy + PC): Tabelle "Settings" anlegen.
+   Ohne sie bleibt alles nur im jeweiligen Browser gespeichert:
+   create table if not exists "Settings" (key text primary key, value text, updated_at timestamptz not null default now());
+   alter table "Settings" enable row level security;
+   create policy "anon read settings" on "Settings" for select to anon using (true);
+   create policy "anon insert settings" on "Settings" for insert to anon with check (true);
+   create policy "anon update settings" on "Settings" for update to anon using (true) with check (true);
+   notify pgrst, 'reload schema';
 */
 
 /* ── Account-Regeln (Eval-Phase) ──
@@ -738,6 +790,21 @@ const CONFLUENCE_CATEGORIES = [
 const DEFAULT_CONFLUENCES = CONFLUENCE_CATEGORIES.flatMap((cat) =>
   cat.levels.map((level) => `${cat.label} ${level}`)
 );
+// Stufen-Kategorien (x1 … x4): pro Kategorie zaehlt nur EINE Stufe. Wer x2 waehlt, hat x1 automatisch
+// erfuellt — das wird in den Chips mitmarkiert ("implied"), gespeichert und gezaehlt wird nur die gewaehlte Stufe.
+const isStackCat = (cat) => cat.levels.every((l) => /^x\d+$/.test(l));
+const toggleConfluenceTag = (list, cat, level) => {
+  const tag = `${cat.label} ${level}`;
+  if (!isStackCat(cat)) return list.includes(tag) ? list.filter((t) => t !== tag) : [...list, tag];
+  const rest = list.filter((t) => !cat.levels.some((l) => `${cat.label} ${l}` === t));
+  return list.includes(tag) ? rest : [...rest, tag];
+};
+const chipState = (list, cat, level) => {
+  if (list.includes(`${cat.label} ${level}`)) return "active";
+  if (!isStackCat(cat)) return "";
+  const picked = cat.levels.findIndex((l) => list.includes(`${cat.label} ${l}`));
+  return picked > cat.levels.indexOf(level) ? "implied" : "";
+};
 // Gespeichert wird immer der deutsche Tag-Name (damit Journale/Vergleiche untereinander kompatibel
 // bleiben) — nur die ANZEIGE wird fuer englische Profile uebersetzt.
 const tagText = (s) => (IS_EN ? String(s).split("Trendbasierte Fib Extension").join("Trend-based Fib Extension").split("Zonen-Indikator").join("Zone indicator") : s);
@@ -932,9 +999,320 @@ const WEEKDAY_FULL = T(
   ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 );
 
+/* ============================================================
+   ANALYTICS — reine Berechnungsfunktionen (ohne React, per #selftest pruefbar)
+   Alles hier arbeitet nur auf Trade-Listen und liefert Zahlen/Objekte zurueck.
+   ============================================================ */
+const mean = (a) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
+const stdev = (a) => {
+  if (a.length < 2) return 0;
+  const m = mean(a);
+  return Math.sqrt(a.reduce((s, v) => s + (v - m) * (v - m), 0) / (a.length - 1));
+};
+const finiteNums = (a) => a.filter((v) => v !== null && v !== undefined && Number.isFinite(v));
+const median = (a) => {
+  if (!a.length) return 0;
+  const s = [...a].sort((x, y) => x - y);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+const quantile = (a, q) => {
+  if (!a.length) return 0;
+  const s = [...a].sort((x, y) => x - y);
+  const pos = (s.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return s[lo] + (s[hi] - s[lo]) * (pos - lo);
+};
+
+// Realisierte Punkte eines Trades (Win = TP, Loss = -SL, BE = 0)
+const tradePoints = (t) => {
+  if (t.result === "be") return 0;
+  if (t.result === "win") return t.take_profit !== null && t.take_profit !== undefined && t.take_profit !== "" ? Number(t.take_profit) : null;
+  if (t.result === "loss") return t.stop_loss !== null && t.stop_loss !== undefined && t.stop_loss !== "" ? -Math.abs(Number(t.stop_loss)) : null;
+  return null;
+};
+
+// Chronologische Reihenfolge: Datum, dann Uhrzeit (falls erfasst), dann ID
+const sortChrono = (list) =>
+  [...list].sort((a, b) => {
+    if (a.trade_date !== b.trade_date) return a.trade_date < b.trade_date ? -1 : 1;
+    const ta = a.entry_time || "";
+    const tb = b.entry_time || "";
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    return Number(a.id || 0) - Number(b.id || 0);
+  });
+
+// Wilson-Score-Intervall (95 %) fuer eine Trefferquote. Bei kleinen Stichproben ist die nackte
+// Winrate irrefuehrend (3 von 3 = 100 %), das Intervall zeigt die echte Unsicherheit.
+function wilsonInterval(wins, n, z = 1.96) {
+  if (!n) return { p: 0, low: 0, high: 0 };
+  const p = wins / n;
+  const z2 = z * z;
+  const denom = 1 + z2 / n;
+  const centre = (p + z2 / (2 * n)) / denom;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
+  return { p, low: Math.max(0, centre - half), high: Math.min(1, centre + half) };
+}
+const fmtCI = (wins, n) => {
+  if (!n) return "—";
+  const w = wilsonInterval(wins, n);
+  return `${(w.low * 100).toFixed(0)}–${(w.high * 100).toFixed(0)}%`;
+};
+
+// Equity-/Drawdown-Verlauf einer Trade-Liste (relativ zu 0, trade fuer trade)
+function equityPath(list) {
+  let run = 0;
+  let peak = 0;
+  let maxDD = 0;
+  const pts = [];
+  sortChrono(list).forEach((t) => {
+    run += Number(t.pnl || 0);
+    if (run > peak) peak = run;
+    if (peak - run > maxDD) maxDD = peak - run;
+    pts.push(run);
+  });
+  return { pts, maxDD, net: run };
+}
+
+// Kennzahlen zur Qualitaet des Edges
+function computeEdgeStats(list) {
+  const wins = list.filter((t) => t.result === "win");
+  const losses = list.filter((t) => t.result === "loss");
+  const decided = wins.length + losses.length;
+  const winPnl = wins.map((t) => Number(t.pnl || 0));
+  const lossPnl = losses.map((t) => Number(t.pnl || 0));
+  const avgWin = mean(winPnl);
+  const avgLoss = mean(lossPnl); // negativ
+  const payoff = avgLoss < 0 ? avgWin / Math.abs(avgLoss) : avgWin > 0 ? Infinity : 0;
+  const winrate = decided ? wins.length / decided : 0;
+  const rs = finiteNums(list.map(tradeRR));
+  const expR = mean(rs);
+  const sdR = stdev(rs);
+  // SQN nach Van Tharp, Stichprobe auf max. 100 Trades normiert
+  const sqn = rs.length >= 5 && sdR > 0 ? (Math.sqrt(Math.min(rs.length, 100)) * expR) / sdR : null;
+  // Kelly: f = W - (1 - W) / Payoff. Nur sinnvoll mit endlichem Payoff > 0.
+  const kelly = Number.isFinite(payoff) && payoff > 0 && decided >= 10 ? winrate - (1 - winrate) / payoff : null;
+  const path = equityPath(list);
+  const recovery = path.maxDD > 0 ? path.net / path.maxDD : null;
+  const risks = finiteNums(list.map((t) => (t.risk_amount === null || t.risk_amount === undefined ? null : Number(t.risk_amount)))).filter((v) => v > 0);
+  const expectancy = decided ? (winPnl.reduce((s, v) => s + v, 0) + lossPnl.reduce((s, v) => s + v, 0)) / decided : 0;
+  return {
+    n: list.length, decided, winrate, avgWin, avgLoss, payoff, expectancy,
+    expR, sdR, sqn, kelly, net: path.net, maxDD: path.maxDD, recovery,
+    avgRisk: mean(risks), maxRisk: risks.length ? Math.max(...risks) : 0, riskN: risks.length,
+  };
+}
+const sqnLabel = (s) => {
+  if (s === null || s === undefined) return T("zu wenig Daten", "not enough data");
+  if (s < 1.6) return T("schwach", "weak");
+  if (s < 2) return T("unterdurchschnittlich", "below average");
+  if (s < 2.5) return T("durchschnittlich", "average");
+  if (s < 3) return T("gut", "good");
+  if (s < 5) return T("sehr gut", "very good");
+  return T("außergewöhnlich", "excellent");
+};
+
+// Verteilung der realisierten Ergebnisse in R-Klassen
+const R_BUCKETS = ["Loss", "BE", "0–1R", "1–2R", "2–3R", "3–5R", "5R+"];
+function rDistribution(list) {
+  const counts = Object.fromEntries(R_BUCKETS.map((b) => [b, 0]));
+  list.forEach((t) => {
+    if (t.result === "loss") counts.Loss += 1;
+    else if (t.result === "be") counts.BE += 1;
+    else if (t.result === "win") {
+      const r = tradeRR(t);
+      if (r === null || Number.isNaN(r)) return;
+      counts[r < 1 ? "0–1R" : r < 2 ? "1–2R" : r < 3 ? "2–3R" : r < 5 ? "3–5R" : "5R+"] += 1;
+    }
+  });
+  const total = R_BUCKETS.reduce((s, b) => s + counts[b], 0);
+  return { total, rows: R_BUCKETS.map((b) => ({ label: b, count: counts[b], share: total ? counts[b] / total : 0 })) };
+}
+
+// Verhaltensanalyse: wie verhaelt sich das Ergebnis nach Gewinn/Verlust, nach Tagesanzahl, nach Uhrzeit?
+function behaviorStats(list) {
+  const mk = () => ({ n: 0, wins: 0, losses: 0, pnl: 0, noPlan: 0, planKnown: 0 });
+  const add = (g, t) => {
+    g.n += 1;
+    g.pnl += Number(t.pnl || 0);
+    if (t.result === "win") g.wins += 1;
+    else if (t.result === "loss") g.losses += 1;
+    if (t.plan_followed === true || t.plan_followed === false) {
+      g.planKnown += 1;
+      if (t.plan_followed === false) g.noPlan += 1;
+    }
+  };
+  const fin = (g) => {
+    const d = g.wins + g.losses;
+    return { ...g, winrate: d ? g.wins / d : 0, avgPnl: g.n ? g.pnl / g.n : 0, noPlanShare: g.planKnown ? g.noPlan / g.planKnown : 0 };
+  };
+  const first = mk(), afterWin = mk(), afterLoss = mk(), bigger = mk(), notBigger = mk();
+  const byDay = new Map();
+  sortChrono(list).forEach((t) => {
+    if (!byDay.has(t.trade_date)) byDay.set(t.trade_date, []);
+    byDay.get(t.trade_date).push(t);
+  });
+  const dayRows = [];
+  byDay.forEach((arr, date) => {
+    let prev = null;
+    arr.forEach((t) => {
+      if (!prev) add(first, t);
+      else if (prev.result === "loss") {
+        add(afterLoss, t);
+        // Groesser nach Verlust: mehr Contracts als beim verlorenen Trade (klassisches Revenge-Muster)
+        if (Number(t.contracts) > Number(prev.contracts)) add(bigger, t);
+        else add(notBigger, t);
+      } else if (prev.result === "win") add(afterWin, t);
+      prev = t;
+    });
+    dayRows.push({ date, n: arr.length, pnl: arr.reduce((s, t) => s + Number(t.pnl || 0), 0) });
+  });
+  // Tage nach Anzahl der Trades gruppieren (1, 2, 3, 4+)
+  const dayGroups = [1, 2, 3, 4].map((k) => {
+    const rows = dayRows.filter((d) => (k === 4 ? d.n >= 4 : d.n === k));
+    return {
+      label: k === 4 ? "4+" : String(k),
+      days: rows.length,
+      avgPnl: mean(rows.map((r) => r.pnl)),
+      greenShare: rows.length ? rows.filter((r) => r.pnl > 0).length / rows.length : 0,
+      pnl: rows.reduce((s, r) => s + r.pnl, 0),
+    };
+  });
+  // Uhrzeit (nur Trades mit erfasster entry_time "HH:MM")
+  const hourMap = new Map();
+  list.forEach((t) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(t.entry_time || "");
+    if (!m) return;
+    const h = Number(m[1]);
+    if (!hourMap.has(h)) hourMap.set(h, mk());
+    add(hourMap.get(h), t);
+  });
+  const byHour = Array.from(hourMap.entries()).sort((a, b) => a[0] - b[0]).map(([h, g]) => ({ hour: h, ...fin(g) }));
+  return {
+    first: fin(first), afterWin: fin(afterWin), afterLoss: fin(afterLoss), bigger: fin(bigger), notBigger: fin(notBigger),
+    dayGroups, byHour, timedCount: byHour.reduce((s, r) => s + r.n, 0),
+    multiTradeDays: dayRows.filter((d) => d.n >= 2).length, dayCount: dayRows.length,
+  };
+}
+
+// Seedbarer Zufallsgenerator (Mulberry32), damit die Simulation reproduzierbar bleibt
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Monte-Carlo: Ziehen mit Zuruecklegen aus den bisherigen Trade-Ergebnissen. Tage werden mit der
+// historischen Trades-pro-Tag-Verteilung gebildet. Die MLL (EOD-Trailing, gedeckelt) wird nur zum
+// Tagesende nachgezogen, ein Breach wird aber schon intraday (nach jedem Trade) erkannt.
+// Das ist eine Schaetzung auf Basis der eigenen Historie, keine Garantie.
+function monteCarlo({ pnls, dayLens, balance, eodPeak, target, ddBuffer, peakCap, staticMll = null, sims = 4000, maxDays = 60, seed = 7 }) {
+  if (!pnls.length) return null;
+  const rnd = mulberry32(seed);
+  const lens = dayLens && dayLens.length ? dayLens : [1];
+  const mllFor = (peak) => (staticMll !== null ? staticMll : Math.min(peak, peakCap) - ddBuffer);
+  let pass = 0, bust = 0, open = 0;
+  const daysToPass = [];
+  const finals = [];
+  for (let s = 0; s < sims; s++) {
+    let bal = balance;
+    let peak = Math.max(eodPeak, balance);
+    let mll = mllFor(peak);
+    let outcome = "open";
+    let day = 0;
+    while (day < maxDays && outcome === "open") {
+      day += 1;
+      const k = lens[Math.floor(rnd() * lens.length)];
+      for (let i = 0; i < k; i++) {
+        bal += pnls[Math.floor(rnd() * pnls.length)];
+        if (bal <= mll) { outcome = "bust"; break; }
+      }
+      if (outcome === "bust") break;
+      if (bal > peak) { peak = bal; mll = mllFor(peak); }
+      if (bal >= target) outcome = "pass";
+    }
+    if (outcome === "pass") { pass += 1; daysToPass.push(day); }
+    else if (outcome === "bust") bust += 1;
+    else open += 1;
+    finals.push(bal);
+  }
+  return {
+    sims, pass: pass / sims, bust: bust / sims, open: open / sims,
+    medianDays: daysToPass.length ? median(daysToPass) : null,
+    p25Days: daysToPass.length ? quantile(daysToPass, 0.25) : null,
+    p75Days: daysToPass.length ? quantile(daysToPass, 0.75) : null,
+    p10Final: quantile(finals, 0.1), p50Final: quantile(finals, 0.5), p90Final: quantile(finals, 0.9),
+    maxDays,
+  };
+}
+
+// Auswertung nach Monat oder Woche (Woche = Montag als Schluessel)
+const weekStartIso = (iso) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+};
+function periodReport(list, by = "month") {
+  const groups = new Map();
+  list.forEach((t) => {
+    if (!t.trade_date) return;
+    const key = by === "week" ? weekStartIso(t.trade_date) : t.trade_date.slice(0, 7);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  });
+  return Array.from(groups.entries())
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .map(([key, arr]) => {
+      const wins = arr.filter((t) => t.result === "win");
+      const losses = arr.filter((t) => t.result === "loss");
+      const gp = wins.reduce((s, t) => s + Number(t.pnl || 0), 0);
+      const gl = Math.abs(losses.reduce((s, t) => s + Number(t.pnl || 0), 0));
+      const dayMap = new Map();
+      arr.forEach((t) => dayMap.set(t.trade_date, (dayMap.get(t.trade_date) || 0) + Number(t.pnl || 0)));
+      const dayVals = Array.from(dayMap.values());
+      const decided = wins.length + losses.length;
+      const rs = finiteNums(arr.map(tradeRR));
+      return {
+        key, n: arr.length, wins: wins.length, losses: losses.length,
+        pnl: arr.reduce((s, t) => s + Number(t.pnl || 0), 0),
+        winrate: decided ? (wins.length / decided) * 100 : 0,
+        pf: gl > 0 ? gp / gl : gp > 0 ? Infinity : 0,
+        avgR: mean(rs),
+        days: dayVals.length, greenDays: dayVals.filter((v) => v > 0).length,
+        best: dayVals.length ? Math.max(...dayVals) : 0, worst: dayVals.length ? Math.min(...dayVals) : 0,
+      };
+    });
+}
+
+// Tages-PnL als Map (fuer Heatmap und Kalender-Zusammenfassungen)
+function dailyPnlMap(list) {
+  const m = new Map();
+  list.forEach((t) => {
+    if (!t.trade_date) return;
+    const e = m.get(t.trade_date) || { pnl: 0, n: 0 };
+    e.pnl += Number(t.pnl || 0);
+    e.n += 1;
+    m.set(t.trade_date, e);
+  });
+  return m;
+}
+
 function TradingJournal() {
-  const [trades, setTrades] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Stand vom letzten Besuch sofort anzeigen (ohne Screenshots) und im Hintergrund aktualisieren.
+  const [cachedTrades] = useState(() => {
+    try {
+      const c = isConfigured && JSON.parse(localStorage.getItem(`journal_trades_cache__${ACTIVE_PROFILE ? ACTIVE_PROFILE.id : "x"}`));
+      return Array.isArray(c) ? c : null;
+    } catch { return null; }
+  });
+  const [trades, setTrades] = useState(cachedTrades || []);
+  const [loading, setLoading] = useState(!cachedTrades);
   const [error, setError] = useState(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [forwardTestOpen, setForwardTestOpen] = useState(false);
@@ -1265,6 +1643,7 @@ function TradingJournal() {
       if (!res.ok) throw new Error(T(`Supabase Fehler ${res.status}`, `Supabase error ${res.status}`));
       const data = await res.json();
       setTrades(data);
+      try { localStorage.setItem(`journal_trades_cache__${ACTIVE_PROFILE ? ACTIVE_PROFILE.id : "x"}`, JSON.stringify(data.map(({ screenshot, ...rest }) => rest))); } catch {}
     } catch (e) {
       setError(e.message || T("Verbindung zu Supabase fehlgeschlagen", "Connection to Supabase failed"));
     } finally {
@@ -1917,6 +2296,71 @@ function TradingJournal() {
     return () => { stopped = true; clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
   }, [notifOn, notifSeenKey, pushToast]);
 
+  // ── Automatische Datenbank-Pruefung ──
+  // Fehlt in der Supabase-Datenbank etwas (Tabelle/Spalte/Policy), erscheint oben ein Hinweis mit einem
+  // Knopf "SQL kopieren". Das Skript ist idempotent (beliebig oft ausfuehrbar). Neue Features, die eine
+  // Datenbank-Aenderung brauchen: Zeile ins SETUP_SQL + Probe unten ergaenzen -> alle sehen den Hinweis automatisch.
+  const SETUP_SQL = `-- Journal Setup (darf beliebig oft ausgeführt werden)
+create table if not exists "Trades" (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  trade_date date not null,
+  symbol text not null,
+  contracts float8 not null default 1,
+  direction text not null,
+  result text not null
+);
+alter table "Trades" add column if not exists stop_loss float8;
+alter table "Trades" add column if not exists take_profit float8;
+alter table "Trades" add column if not exists rr float8;
+alter table "Trades" add column if not exists realized_rr float8;
+alter table "Trades" add column if not exists risk_amount float8;
+alter table "Trades" add column if not exists pnl float8;
+alter table "Trades" add column if not exists note text;
+alter table "Trades" add column if not exists screenshot text;
+alter table "Trades" add column if not exists setup text;
+alter table "Trades" add column if not exists confluences text[];
+alter table "Trades" add column if not exists plan_followed boolean;
+create table if not exists "Settings" (key text primary key, value text, updated_at timestamptz not null default now());
+alter table "Trades" enable row level security;
+alter table "Settings" enable row level security;
+drop policy if exists "journal anon all" on "Trades";
+create policy "journal anon all" on "Trades" for all to anon using (true) with check (true);
+drop policy if exists "journal anon all" on "Settings";
+create policy "journal anon all" on "Settings" for all to anon using (true) with check (true);
+notify pgrst, 'reload schema';`;
+  const [setupIssue, setSetupIssue] = useState(false);
+  const [setupHidden, setSetupHidden] = useState(false);
+  useEffect(() => {
+    if (!isConfigured) return undefined;
+    let dead = false;
+    (async () => {
+      try {
+        const probes = [
+          `${REST_URL}?select=risk_amount,realized_rr,setup,confluences,plan_followed&limit=1`,
+          `${String(SUPABASE_URL).replace(/\/+$/, "")}/rest/v1/Settings?select=key&limit=1`,
+        ];
+        const rs = await Promise.all(probes.map((u) => fetch(u, { headers: sbHeaders })));
+        if (!dead && rs.some((r) => !r.ok)) setSetupIssue(true);
+      } catch {}
+    })();
+    return () => { dead = true; };
+  }, []);
+  const copySetupSql = async () => {
+    try { await navigator.clipboard.writeText(SETUP_SQL); pushToast(T("SQL kopiert — jetzt im SQL Editor einfügen und „Run“ klicken", "SQL copied — now paste it into the SQL editor and click “Run”")); }
+    catch { pushToast(T("Kopieren nicht möglich — SQL unten markieren und kopieren", "Copy not possible — select and copy the SQL below"), "error"); }
+  };
+  const sqlEditorUrl = `https://supabase.com/dashboard/project/${String(SUPABASE_URL).replace(/^https?:\/\//, "").split(".")[0]}/sql/new`;
+  // Einmaliger Hinweis auf die Benachrichtigungen (Browser verlangen einen eigenen Klick fuer die Erlaubnis)
+  useEffect(() => {
+    try {
+      if (notifSupported && Notification.permission === "default" && localStorage.getItem("journal_notif_hint") !== "1") {
+        localStorage.setItem("journal_notif_hint", "1");
+        pushToast(T("Tipp: Tippe oben auf „Alerts“, um Meldungen bei neuen Trades deiner Freunde zu bekommen.", "Tip: tap “Alerts” at the top to get notified about your friends' new trades."));
+      }
+    } catch {}
+  }, []);
+
   const today = new Date();
   const isCurrentMonthNow = cursor.year === today.getFullYear() && cursor.month === today.getMonth();
 
@@ -1996,6 +2440,26 @@ function TradingJournal() {
         </div>
       )}
       {error && <div className="notice notice-error">{error}</div>}
+      {setupIssue && !setupHidden && (
+        <div className="notice" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          <div>
+            <b>{T("Datenbank-Update nötig", "Database update needed")}</b>{" — "}
+            {T("Deine Supabase-Datenbank braucht einmalig ein kleines Update, damit alle Funktionen gehen (z. B. Plan-Angabe, Funded Stage auf allen Geräten).", "Your Supabase database needs a small one-time update so all features work (e.g. plan flag, funded stage on all devices).")}
+          </div>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            <button type="button" className="btn-primary" onClick={copySetupSql}>{T("1. SQL kopieren", "1. Copy SQL")}</button>
+            <a className="btn-secondary" href={sqlEditorUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{T("2. SQL Editor öffnen", "2. Open SQL editor")}</a>
+            <button type="button" className="btn-secondary" onClick={() => setSetupHidden(true)}>{T("Später", "Later")}</button>
+          </div>
+          <span style={{ fontSize: "11px", color: "var(--muted-light)" }}>
+            {T("3. Dort einfügen, auf „Run“ klicken, danach diese Seite neu laden. Der Hinweis verschwindet von selbst.", "3. Paste it there, click “Run”, then reload this page. This notice disappears on its own.")}
+          </span>
+          <details>
+            <summary style={{ cursor: "pointer", fontSize: "11px", color: "var(--muted-light)" }}>{T("SQL anzeigen", "Show SQL")}</summary>
+            <pre style={{ whiteSpace: "pre-wrap", fontSize: "11px", userSelect: "all", margin: "8px 0 0" }}>{SETUP_SQL}</pre>
+          </details>
+        </div>
+      )}
 
       <section className="hero">
         <div className="hero-balance">
@@ -2720,19 +3184,33 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
 
   const computed = useMemo(() => computeTrade(form), [form.symbol, form.contracts, form.stop_loss, form.take_profit, form.result]);
 
+  // Screenshots vor dem Speichern verkleinern (max. 1600 px, JPEG 82 %): Handy-Fotos haben mehrere MB und
+  // wuerden sonst bei jedem Laden mitgeladen. Bei jedem Problem wird das Original verwendet.
   const handleFile = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setForm((f) => ({ ...f, screenshot: reader.result }));
-    reader.readAsDataURL(file);
-  };
-
-  const toggleConfluence = (tag) => {
-    setForm((f) => {
-      const has = f.confluences.includes(tag);
-      return { ...f, confluences: has ? f.confluences.filter((c) => c !== tag) : [...f.confluences, tag] };
-    });
+    const useOriginal = () => {
+      const reader = new FileReader();
+      reader.onload = () => setForm((f) => ({ ...f, screenshot: reader.result }));
+      reader.readAsDataURL(file);
+    };
+    const objUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objUrl);
+      try {
+        const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        const out = canvas.toDataURL("image/jpeg", 0.82);
+        if (out.length < file.size * 1.37) setForm((f) => ({ ...f, screenshot: out }));
+        else useOriginal();
+      } catch { useOriginal(); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(objUrl); useOriginal(); };
+    img.src = objUrl;
   };
 
   const addNewConfluence = () => {
@@ -2959,8 +3437,8 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
                           <button
                             type="button"
                             key={tag}
-                            className={`confluence-chip ${form.confluences.includes(tag) ? "active" : ""}`}
-                            onClick={() => toggleConfluence(tag)}
+                            className={`confluence-chip ${chipState(form.confluences, cat, level)}`}
+                            onClick={() => setForm((f) => ({ ...f, confluences: toggleConfluenceTag(f.confluences, cat, level) }))}
                             title={tagText(tag)}
                           >
                             {level}
@@ -3252,8 +3730,8 @@ function ForwardTestPanel({ onClose, trades, existingConfluences, realizedRRForT
                       <button
                         type="button"
                         key={tag}
-                        className={`confluence-chip ${selected.includes(tag) ? "active" : ""}`}
-                        onClick={() => toggle(tag)}
+                        className={`confluence-chip ${chipState(selected, cat, level)}`}
+                        onClick={() => setSelected((s) => toggleConfluenceTag(s, cat, level))}
                         title={tagText(tag)}
                       >
                         {level}
@@ -4601,7 +5079,10 @@ function FriendsPanel({ onClose, myTrades }) {
 }
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(ACTIVE_PROFILE ? <TradingJournal /> : <ProfilePicker />);
+const renderApp = () => root.render(ACTIVE_PROFILE ? <TradingJournal /> : <ProfilePicker />);
+// Erst die gesyncten Funded-Stage-Einstellungen laden (max. 4 s), dann rendern.
+if (ACTIVE_PROFILE && window.__settingsReady) window.__settingsReady.then(renderApp, renderApp);
+else renderApp();
 </script>
 
 </body>
