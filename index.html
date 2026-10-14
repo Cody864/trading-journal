@@ -2,7 +2,14 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#000000" />
+<meta name="color-scheme" content="dark" />
+<meta name="format-detection" content="telephone=no" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+<link rel="apple-touch-icon" href="sharingan.png" />
 <title>Trading Journal</title>
 <link rel="icon" type="image/x-icon" href="sharingan.png">
 <style>
@@ -476,6 +483,77 @@
     .topbar { flex-wrap: wrap; gap: 14px; }
     .topbar-actions { width: 100%; }
     .btn-secondary, .topbar-actions .btn-primary { flex: 1; justify-content: center; }
+  }
+  /* ══ Handy / Touch ══
+     Bottom-Sheets statt Pop-ups, grosse Tap-Ziele, kein iOS-Zoom beim Tippen in Felder,
+     Safe-Areas (Notch/Home-Balken), schwebender "Trade hinzufuegen"-Button in Daumen-Reichweite. */
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  html, body { min-height: 100dvh; overflow-x: hidden; }
+  #root { min-height: 100dvh; }
+  button, input, select, textarea, label, .cal-cell { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  @media (hover: none) and (pointer: coarse), (max-width: 720px) {
+    .btn-primary, .btn-secondary, .filter-chip, .dir-btn, .confluence-chip, .cal-navbtn { min-height: 44px; }
+    .icon-btn { padding: 10px; }
+    .cal-navbtn { min-width: 44px; }
+  }
+  @media (max-width: 720px) {
+    input, select, textarea { font-size: 16px !important; }
+    .journal-shell {
+      padding: max(14px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+               calc(92px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+      gap: 18px; font-size: 1em;
+    }
+    .topbar { padding-bottom: 14px; }
+    .topbar-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .topbar-actions .btn-secondary { padding: 10px 8px; font-size: 12px; }
+    .topbar-actions .btn-primary {
+      position: fixed; right: max(14px, env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom));
+      z-index: 40; border-radius: 999px; padding: 14px 22px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,255,255,0.14);
+    }
+    .toast-stack { bottom: calc(84px + env(safe-area-inset-bottom)); }
+
+    .hero { padding: 18px 16px; gap: 14px; flex-direction: column; align-items: stretch; }
+    .hero-balance { min-width: 0; }
+    .hero-value { font-size: 32px; }
+    .hero-curve { min-width: 0; max-width: 100%; width: 100%; flex: none; }
+    .equity-svg { height: 110px; }
+    .stat-card { padding: 14px; min-width: 0; }
+    .insights-card, .risk-card, .payout-card { padding: 16px; }
+
+    .cal-title { font-size: 17px; }
+    .cal-grid-header, .cal-week { gap: 3px; }
+    .cal-dow { font-size: 10px; letter-spacing: 0; }
+    .cal-cell { min-height: 54px; padding: 5px 4px; border-radius: 3px; min-width: 0; }
+    .cal-daynum { font-size: 10.5px; }
+    .cal-pnl { font-size: 10.5px; letter-spacing: -0.03em; white-space: nowrap; overflow: hidden; }
+    .cal-count, .cal-historic-badge { font-size: 8.5px; }
+    .cal-weeksum {
+      display: flex; grid-column: 1 / -1; flex-direction: row; align-items: center;
+      justify-content: space-between; min-height: 0; padding: 6px 10px; margin-bottom: 4px;
+    }
+
+    /* Panels als Bottom-Sheet (auch das Freunde-Fenster mit seiner festen Breite) */
+    .overlay { padding: 0; align-items: flex-end; }
+    .overlay > .panel {
+      width: 100% !important; max-width: 100% !important; max-height: 94dvh !important;
+      border-radius: 16px 16px 0 0; border-bottom: none; gap: 14px;
+      padding: 18px 14px calc(20px + env(safe-area-inset-bottom)); overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+    .overlay > .panel > .panel-head {
+      position: sticky; top: 0; z-index: 2; background: var(--panel);
+      margin: -18px -14px 0; padding: 18px 14px 10px; border-bottom: 1px solid var(--line);
+    }
+    .shot-overlay-img { max-width: 100%; height: auto; }
+
+    /* Freunde-Vergleich: Spalten enger bzw. untereinander */
+    [style*="repeat(3,"] { grid-template-columns: 1fr !important; }
+    [style*="grid-row"] { grid-column: 1 !important; grid-row: auto !important; }
+    [style*="190px 1fr 1fr"] { grid-template-columns: 84px 1fr 1fr !important; gap: 8px !important; }
+    [style*="180px 1fr 1fr"] { grid-template-columns: 96px 1fr 1fr !important; gap: 8px !important; }
+    [style*="112px 1fr 1fr"] { grid-template-columns: 76px 1fr 1fr !important; gap: 8px !important; }
   }
 </style>
 </head>
