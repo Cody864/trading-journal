@@ -665,7 +665,7 @@ const DEFAULT_CONFLUENCES = CONFLUENCE_CATEGORIES.flatMap((cat) =>
 );
 // Gespeichert wird immer der deutsche Tag-Name (damit Journale/Vergleiche untereinander kompatibel
 // bleiben) — nur die ANZEIGE wird fuer englische Profile uebersetzt.
-const tagText = (s) => (IS_EN ? String(s).split("Trendbasierte Fib Extension").join("Trend-based Fib Extension") : s);
+const tagText = (s) => (IS_EN ? String(s).split("Trendbasierte Fib Extension").join("Trend-based Fib Extension").split("Zonen-Indikator").join("Zone indicator") : s);
 
 const REST_URL = `${SUPABASE_URL}/rest/v1/Trades`;
 
@@ -1746,6 +1746,102 @@ function TradingJournal() {
     [pushToast]
   );
 
+  // ── Benachrichtigungen: neue Trades der Freunde ──
+  // Solange das Journal im Browser offen ist (auch im Hintergrund-Tab), wird alle 45 s bei den
+  // Datenbanken der Freunde nachgefragt (nur lesend, wie im Freunde-Fenster). Kommt ein Trade mit
+  // hoeherer ID als beim letzten Mal dazu, gibt es eine Browser-Benachrichtigung + Toast.
+  // Beim ersten Durchlauf pro Freund wird nur der aktuelle Stand gemerkt (keine Flut alter Meldungen).
+  const notifProfileId = ACTIVE_PROFILE ? ACTIVE_PROFILE.id : "x";
+  const notifKey = `journal_notif__${notifProfileId}`;
+  const notifSeenKey = `journal_notif_seen__${notifProfileId}`;
+  const notifSupported = typeof window !== "undefined" && "Notification" in window;
+  const [notifOn, setNotifOn] = useState(() => {
+    try { return notifSupported && Notification.permission === "granted" && localStorage.getItem(notifKey) === "1"; } catch { return false; }
+  });
+
+  const toggleNotifications = useCallback(async () => {
+    if (!notifSupported) {
+      pushToast(T("Dein Browser unterstützt keine Benachrichtigungen.", "Your browser does not support notifications."), "error");
+      return;
+    }
+    if (notifOn) {
+      try { localStorage.setItem(notifKey, "0"); } catch {}
+      setNotifOn(false);
+      pushToast(T("Benachrichtigungen ausgeschaltet", "Notifications turned off"));
+      return;
+    }
+    if (!window.isSecureContext) {
+      pushToast(T("Benachrichtigungen funktionieren nur über https:// (z. B. GitHub Pages), nicht über eine lokal geöffnete Datei.", "Notifications only work over https:// (e.g. GitHub Pages), not from a locally opened file."), "error");
+      return;
+    }
+    let perm = Notification.permission;
+    if (perm === "default") {
+      try { perm = await Notification.requestPermission(); } catch { perm = "denied"; }
+    }
+    if (perm === "granted") {
+      try { localStorage.setItem(notifKey, "1"); } catch {}
+      setNotifOn(true);
+      pushToast(T("Benachrichtigungen aktiv — du siehst neue Trades deiner Freunde", "Notifications on — you will see your friends' new trades"));
+    } else {
+      pushToast(T("Benachrichtigungen sind im Browser blockiert — erlaube sie in den Seiteneinstellungen (Schloss-Symbol neben der URL).", "Notifications are blocked in the browser — allow them in the site settings (lock icon next to the URL)."), "error");
+    }
+  }, [notifOn, notifSupported, notifKey, pushToast]);
+
+  useEffect(() => {
+    if (!notifOn) return undefined;
+    let stopped = false;
+    let running = false;
+    const readSeen = () => { try { return JSON.parse(localStorage.getItem(notifSeenKey) || "{}") || {}; } catch { return {}; } };
+    const writeSeen = (o) => { try { localStorage.setItem(notifSeenKey, JSON.stringify(o)); } catch {} };
+    const tradeLine = (r) =>
+      `${r.symbol || ""} ${r.direction === "long" ? "Long" : r.direction === "short" ? "Short" : ""} · ${String(r.result || "").toUpperCase()} · ${fmtMoneyShort(Number(r.pnl || 0))}`
+        .replace(/\s+/g, " ").trim();
+    const notify = (friend, fresh, tagId) => {
+      const title = fresh.length === 1
+        ? T(`Neuer Trade von ${friend.name}`, `New trade from ${friend.name}`)
+        : T(`${fresh.length} neue Trades von ${friend.name}`, `${fresh.length} new trades from ${friend.name}`);
+      const body = fresh.slice(-3).map(tradeLine).join("\n");
+      try { new Notification(title, { body, tag: `journal-${tagId}`, icon: "sharingan.png" }); } catch {}
+      pushToast(`${title}: ${tradeLine(fresh[fresh.length - 1])}`);
+    };
+    const poll = async () => {
+      if (stopped || running) return;
+      running = true;
+      try {
+        const seen = readSeen();
+        let changed = false;
+        for (const f of loadFriendsLS()) {
+          try {
+            const res = await fetch(`${f.url}/rest/v1/Trades?select=id,trade_date,symbol,direction,result,pnl&order=id.desc&limit=15`, {
+              method: "GET",
+              headers: { apikey: f.key, Authorization: `Bearer ${f.key}` },
+            });
+            if (!res.ok) continue;
+            const rows = await res.json();
+            if (!Array.isArray(rows)) continue;
+            const maxId = rows.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
+            const key = normalizeSupabaseUrl(f.url);
+            if (seen[key] === undefined || maxId < seen[key]) { seen[key] = maxId; changed = true; continue; }
+            const fresh = rows.filter((r) => Number(r.id) > seen[key]).sort((a, b) => Number(a.id) - Number(b.id));
+            if (fresh.length) {
+              seen[key] = maxId;
+              changed = true;
+              notify(f, fresh, `${f.id}-${maxId}`);
+            }
+          } catch {}
+        }
+        if (changed) writeSeen(seen);
+      } finally {
+        running = false;
+      }
+    };
+    poll();
+    const timer = setInterval(poll, 45000);
+    const onVisible = () => { if (document.visibilityState === "visible") poll(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { stopped = true; clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
+  }, [notifOn, notifSeenKey, pushToast]);
+
   const today = new Date();
   const isCurrentMonthNow = cursor.year === today.getFullYear() && cursor.month === today.getMonth();
 
@@ -1799,6 +1895,13 @@ function TradingJournal() {
           )}
           <button className="btn-secondary" onClick={switchProfile} title={T("Profil wechseln", "Switch profile")}>
             {ACTIVE_PROFILE ? ACTIVE_PROFILE.name : T("Profil", "Profile")} ⇄
+          </button>
+          <button
+            className={`btn-secondary ${notifOn ? "active" : ""}`}
+            onClick={toggleNotifications}
+            title={T("Browser-Benachrichtigung, wenn ein Freund einen neuen Trade einträgt (nur solange das Journal offen ist)", "Browser notification when a friend adds a new trade (only while the journal is open)")}
+          >
+            {notifOn ? T("Alerts an", "Alerts on") : T("Alerts aus", "Alerts off")}
           </button>
           <button className="btn-secondary" onClick={() => setFriendsOpen(true)} title={T("Kalender, Stats & Equity mit Freunden vergleichen", "Compare calendar, stats & equity with friends")}>
             {T("Freunde", "Friends")}
