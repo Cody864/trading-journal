@@ -578,6 +578,19 @@
   .heat-grid { grid-template-rows: repeat(7, 13px); grid-auto-flow: column; }
   .heat-cell { width: 13px; height: 13px; border-radius: 2px; background: var(--panel-2); border: 1px solid var(--line); }
   .heat-cell.has { border-color: transparent; }
+
+  /* ── Accounts ── */
+  .acct-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .acct-bar .btn-secondary { padding: 9px 13px; font-size: 11.5px; }
+  .acct-bar .filter-chip { display: inline-flex; align-items: center; }
+  .acct-tag { font-size: 9px; letter-spacing: 0.08em; padding: 2px 6px; border-radius: 3px; border: 1px solid var(--line); color: var(--muted-light); margin-left: 7px; }
+  .acct-tag.xfa { color: #2ecc71; border-color: rgba(46,204,113,0.45); }
+  .acct-note { font-size: 11.5px; color: var(--muted-light); line-height: 1.6; margin-top: -10px; }
+  .cal-cell-other { opacity: 0.62; }
+  @media (max-width: 720px) {
+    .acct-bar .filter-group { flex-wrap: wrap; }
+    .acct-bar .btn-secondary, .acct-bar .filter-chip { min-height: 40px; }
+  }
 </style>
 </head>
 <body>
@@ -640,6 +653,38 @@ const ACTIVE_PROFILE = (() => {
     return PROFILES.find((p) => p.id === id) || null;
   } catch { return null; }
 })();
+/* ── Accounts ──
+   Pro Profil koennen mehrere Konten (Eval / XFA, beliebig kombinierbar) gefuehrt werden. Jeder Trade gehoert ueber die
+   Spalte "account_id" zu einem Konto (leer = Hauptaccount "main", also alle Trades von vor diesem Feature).
+   Funded-Stage-Einstellungen und Payouts sind pro Konto getrennt (siehe nsKey unten). Ein "Account Reset" archiviert
+   das aktuelle Konto (z. B. eine geblowte Eval) und startet ein neues, leeres Konto — die alten Trades bleiben in der
+   Datenbank und sind ueber die Ansicht "All time" weiterhin sichtbar. */
+const ACCOUNTS_LS_KEY = "journal_accounts";
+const ACTIVE_ACCOUNT_LS_KEY = "journal_active_account";
+const MAIN_ACCOUNT_ID = "main";
+const ACTIVE_ACCOUNT_ID = (() => {
+  try {
+    if (!ACTIVE_PROFILE) return MAIN_ACCOUNT_ID;
+    return localStorage.getItem(`${ACTIVE_ACCOUNT_LS_KEY}__${ACTIVE_PROFILE.id}`) || MAIN_ACCOUNT_ID;
+  } catch { return MAIN_ACCOUNT_ID; }
+})();
+const accountOf = (t) => (t && t.account_id) || MAIN_ACCOUNT_ID;
+function loadAccounts() {
+  let list = [];
+  try {
+    const raw = localStorage.getItem(ACCOUNTS_LS_KEY);
+    const v = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(v)) list = v.filter((a) => a && a.id && a.name);
+  } catch {}
+  if (!list.some((a) => a.id === MAIN_ACCOUNT_ID)) {
+    list = [{ id: MAIN_ACCOUNT_ID, name: T("Hauptaccount", "Main account"), type: "eval", archived: false }, ...list];
+  }
+  return list;
+}
+function saveAccounts(list) {
+  try { localStorage.setItem(ACCOUNTS_LS_KEY, JSON.stringify(list)); } catch {}
+}
+
 const switchProfile = () => {
   try { localStorage.removeItem(PROFILE_LS_KEY); } catch {}
   window.location.reload();
@@ -658,9 +703,20 @@ try { document.documentElement.lang = IS_EN ? "en" : "de"; } catch {}
 if (ACTIVE_PROFILE) {
   const rawGet = Storage.prototype.getItem;
   const rawSet = Storage.prototype.setItem;
-  const nsKey = (k) => (typeof k === "string" && k.startsWith("journal_funded") ? `${k}__${ACTIVE_PROFILE.id}` : k);
+  const nsKey = (k) => {
+    if (typeof k !== "string") return k;
+    // Account-Liste und aktiver Account gelten fuers ganze Profil.
+    if (k === ACCOUNTS_LS_KEY || k === ACTIVE_ACCOUNT_LS_KEY) return `${k}__${ACTIVE_PROFILE.id}`;
+    // Funded-Stage-Einstellungen & Payouts: pro Profil UND pro Account. Der Hauptaccount behaelt die bisherigen Schluessel.
+    if (k.startsWith("journal_funded")) {
+      return ACTIVE_ACCOUNT_ID === MAIN_ACCOUNT_ID ? `${k}__${ACTIVE_PROFILE.id}` : `${k}__${ACTIVE_PROFILE.id}__${ACTIVE_ACCOUNT_ID}`;
+    }
+    return k;
+  };
+  // Schluessel in der Settings-Tabelle: Einstellungen eines Zusatz-Accounts bekommen den Account als Suffix.
+  const remoteKey = (k) => (k.startsWith("journal_funded") && ACTIVE_ACCOUNT_ID !== MAIN_ACCOUNT_ID ? `${k}__${ACTIVE_ACCOUNT_ID}` : k);
   // Einmalige Uebernahme der bisherigen Werte fuer den urspruenglichen Besitzer.
-  if (ACTIVE_PROFILE.legacyOwner) {
+  if (ACTIVE_PROFILE.legacyOwner && ACTIVE_ACCOUNT_ID === MAIN_ACCOUNT_ID) {
     ["journal_funded_stage", "journal_funded_start_date", "journal_funded_activated_at"].forEach((k) => {
       try {
         const legacy = rawGet.call(localStorage, k);
@@ -673,22 +729,23 @@ if (ACTIVE_PROFILE) {
   // Geraets, auf dem sie gesetzt wurden (Handy startete deshalb immer in der Eval Stage). Jetzt werden
   // sie zusaetzlich in der Datenbank gespeichert und beim Start geladen. Die Datenbank gewinnt; nur wenn
   // dort noch nichts steht, wird der lokale Wert hochgeladen. Fehlt die Tabelle, bleibt alles lokal.
-  const SYNC_KEYS = ["journal_funded_stage", "journal_funded_start_date", "journal_funded_activated_at", "journal_funded_payouts", "journal_funded_last_payout"];
+  const SYNC_KEYS = ["journal_funded_stage", "journal_funded_start_date", "journal_funded_activated_at", "journal_funded_payouts", "journal_funded_last_payout", ACCOUNTS_LS_KEY];
   const settingsOn = !String(ACTIVE_PROFILE.url).includes("DEIN-PROJEKT") && !String(ACTIVE_PROFILE.key).includes("DEIN-ANON-KEY");
   const SETTINGS_URL = `${String(ACTIVE_PROFILE.url).replace(/\/+$/, "")}/rest/v1/Settings`;
   const sbH = { apikey: ACTIVE_PROFILE.key, Authorization: `Bearer ${ACTIVE_PROFILE.key}`, "Content-Type": "application/json" };
   const pushSetting = (k, v) => {
-    if (!settingsOn) return;
-    fetch(`${SETTINGS_URL}?on_conflict=key`, {
+    if (!settingsOn) return Promise.resolve();
+    return fetch(`${SETTINGS_URL}?on_conflict=key`, {
       method: "POST",
       headers: { ...sbH, Prefer: "resolution=merge-duplicates,return=minimal" },
+      keepalive: true,
       body: JSON.stringify({ key: k, value: v, updated_at: new Date().toISOString() }),
     }).catch(() => {});
   };
   Storage.prototype.getItem = function (k) { return rawGet.call(this, nsKey(k)); };
   Storage.prototype.setItem = function (k, v) {
     const r = rawSet.call(this, nsKey(k), v);
-    if (this === window.localStorage && SYNC_KEYS.includes(k)) pushSetting(k, v);
+    if (this === window.localStorage && SYNC_KEYS.includes(k)) window.__lastPush = pushSetting(remoteKey(k), v);
     return r;
   };
   window.__settingsReady = (async () => {
@@ -702,19 +759,22 @@ if (ACTIVE_PROFILE) {
       const remote = {};
       (await res.json()).forEach((r) => { remote[r.key] = r.value; });
       SYNC_KEYS.forEach((k) => {
-        if (remote[k] !== undefined && remote[k] !== null) rawSet.call(localStorage, nsKey(k), remote[k]);
+        const rk = remoteKey(k);
+        if (remote[rk] !== undefined && remote[rk] !== null) rawSet.call(localStorage, nsKey(k), remote[rk]);
         else {
           const local = rawGet.call(localStorage, nsKey(k));
-          if (local !== null) pushSetting(k, local);
+          if (local !== null) pushSetting(rk, local);
         }
       });
+      // Account-Regeln (Presets) nach dem Sync neu anwenden, falls die Account-Liste aus der Datenbank kam.
+      try { if (window.__applyRules) window.__applyRules(); } catch {}
     } catch {}
   })();
 }
 
 const SUPABASE_URL = ACTIVE_PROFILE ? ACTIVE_PROFILE.url : "";
 const SUPABASE_ANON_KEY = ACTIVE_PROFILE ? ACTIVE_PROFILE.key : "";
-const STARTING_BALANCE = 50000;
+let STARTING_BALANCE = 50000;
 // Trades vor diesem Datum zaehlen nicht mehr in die Performance-Stats (Profit Factor,
 // Winrate, Avg RR, Streaks, Bester/Schlechtester Trade, Nach-Wochentag etc.), bleiben
 // aber im Kalender sichtbar und im Account-Balance/Drawdown vollstaendig enthalten.
@@ -724,8 +784,8 @@ const STATS_CUTOFF_DATE = "2026-09-01";
 // kann. Ersetzt STARTING_BALANCE als Ausgangspunkt fuer die Funded-Stage-Balance/
 // Drawdown-Berechnung, damit die Balance korrekt weiterlaeuft, ohne die alten Trades
 // erneut einzeln erfassen zu muessen. Auf STARTING_BALANCE setzen, um das zu deaktivieren.
-const FUNDED_BALANCE_OVERRIDE =
-  ACTIVE_PROFILE && ACTIVE_PROFILE.fundedBalanceOverride != null ? ACTIVE_PROFILE.fundedBalanceOverride : STARTING_BALANCE;
+let FUNDED_BALANCE_OVERRIDE =
+  ACTIVE_PROFILE && ACTIVE_PROFILE.fundedBalanceOverride != null && ACTIVE_ACCOUNT_ID === MAIN_ACCOUNT_ID ? ACTIVE_PROFILE.fundedBalanceOverride : STARTING_BALANCE;
 
 /* Optional, aber empfohlen: lege in Supabase eine Spalte "realized_rr" (Typ: float8,
    nullable) in der Tabelle "Trades" an, damit der realisierte RR-Wert dauerhaft
@@ -764,13 +824,13 @@ const FUNDED_BALANCE_OVERRIDE =
    einem Equity-Cap (Funded: 51.600, dann MLL fix bei 50.100) — danach bleibt die MLL fix,
    auch wenn die Equity weiter steigt.
 */
-const DD_BUFFER = 1500; // Funded Stage (Builder 50K Add-On: MLL 1.500$, gilt fuer Eval, Sim Funded und Live)
-const DD_PEAK_CAP = 51600; // Funded Stage: MLL sperrt bei EOD-Peak 51.600 -> Floor 50.100 (Start + 100$)
+let DD_BUFFER = 1500; // Funded Stage (Builder 50K Add-On: MLL 1.500$, gilt fuer Eval, Sim Funded und Live)
+let DD_PEAK_CAP = 51600; // Funded Stage: MLL sperrt bei EOD-Peak 51.600 -> Floor 50.100 (Start + 100$)
 // Eval Stage: MLL liegt immer exakt 1.500$ unter dem hoechsten EOD-Stand (trailing, ohne Cap),
 // z. B. Start 50.000 -> MLL 48.500, Peak 51.000 -> MLL 49.500.
-const EVAL_DD_BUFFER = 1500;
-const EVAL_DD_PEAK_CAP = Infinity;
-const ACCOUNT_PASS_TARGET = 53000; // Equity-Ziel, ab dem der Account "passed" ist
+let EVAL_DD_BUFFER = 1500;
+let EVAL_DD_PEAK_CAP = Infinity;
+let ACCOUNT_PASS_TARGET = 53000; // Equity-Ziel, ab dem der Account "passed" ist
 
 /* ── Payout-Phase (nach Eval Passed) ──
    MyFundedFutures Builder 50K Add-On (Sim Funded): mind. 2 Handelstage pro Zyklus, MLL 1.500$, Buffer 1.600$,
@@ -778,18 +838,228 @@ const ACCOUNT_PASS_TARGET = 53000; // Equity-Ziel, ab dem der Account "passed" i
    50%-Consistency-Regel (kein Tag > 50% des Zyklus-Gewinns),
    Trailing-DD-Cap endet bei 51.600 (Floor 50.100).
 */
-const PAYOUT_BUFFER = 1600; // = MLL + 100$ // Buffer ueber Startkapital, der vor dem ersten Payout geclearet sein muss
-const PAYOUT_MIN_NET_PROFIT = 500; // min. Netto-Gewinn ueber Buffer (1. Payout) bzw. seit letztem Payout
-const PAYOUT_MAX_AMOUNT = 2000; // max. Auszahlung pro Zyklus
-const PAYOUT_MIN_DAYS = 2; // min. Handelstage pro Payout-Zyklus
-const PAYOUT_CONSISTENCY_PCT = 50;
-const PAYOUT_DD_PEAK_CAP = 51600;
-const PAYOUT_MAX_SIM = 5; // max. Sim-Payouts, danach Live-Promotion
-const PAYOUT_SPLIT = 0.8; // 80/20
-const MLL_AFTER_FIRST_PAYOUT = STARTING_BALANCE + 100; // nach dem 1. Payout wird die MLL statisch (50.100$)
+let PAYOUT_BUFFER = 1600; // = MLL + 100$ // Buffer ueber Startkapital, der vor dem ersten Payout geclearet sein muss
+let PAYOUT_MIN_NET_PROFIT = 500; // min. Netto-Gewinn ueber Buffer (1. Payout) bzw. seit letztem Payout
+let PAYOUT_MAX_AMOUNT = 2000; // max. Auszahlung pro Zyklus
+let PAYOUT_MIN_DAYS = 2; // min. Handelstage pro Payout-Zyklus
+let PAYOUT_CONSISTENCY_PCT = 50;
+let PAYOUT_DD_PEAK_CAP = 51600;
+let PAYOUT_MAX_SIM = 5; // max. Sim-Payouts, danach Live-Promotion
+let PAYOUT_SPLIT = 0.8; // 80/20
+let MLL_AFTER_FIRST_PAYOUT = STARTING_BALANCE + 100; // nach dem 1. Payout wird die MLL statisch (50.100$)
+/* ── Regel-Presets (Prop Firms) ──
+   Beim Anlegen eines Accounts kann ein Plan (MFFU, FundedNext, Lucid) gewaehlt werden. Die Zahlen (Profit-Ziel, Max Loss,
+   Payout-Regeln) werden pro Account gespeichert und ueberschreiben beim Start die Konstanten oben (applyAccountRules).
+   Stand: oeffentliche Regelwerke der Firmen, Oktober 2026 — Regeln aendern sich oft, bitte im Dashboard gegenpruefen.
+   Vereinfachungen: Intraday-Drawdowns werden auf Tagesbasis (EOD) nachgebildet; Daily-Loss-Limits, Contract-Limits und
+   die Consistency-Regel der Evaluation werden nicht ueberwacht. */
+let PAYOUT_MIN_REQUEST = 0;
+let PAYOUT_PCT = 1;
+let PAYOUT_MIN_DAY_PROFIT = 0;
+let PAYOUT_MAX_FIRST = 2000;
+const NOCAP = 1e9;
+const usd0 = (n) => "$" + Math.round(n).toLocaleString(LOCALE);
+const kfmt = (n) => `${Math.round(n / 100) / 10}k`;
+const sizeK = (n) => `${Math.round(n / 1000)}K`;
+
+// o: target, dd (Max Loss), lock (Floor sperrt bei Start + lock), evalFree (Eval ohne Sperre), staticOffset (Floor nach 1. Payout = Start + offset),
+//    buffer (Zahl oder "dd" = MLL + 100), minProfit, minRequest, maxPayout, maxPayoutFirst, payoutPct, minDays, minDayProfit,
+//    consistency (%), maxPayouts (0 = unbegrenzt), split
+const mkRules = (size, o) => {
+  const cap = size + (o.lock ?? 100) + o.dd;
+  return {
+    size, target: o.target, evalDD: o.dd, evalCap: o.evalFree ? null : cap,
+    fundedDD: o.dd, fundedCap: cap, staticOffset: o.staticOffset ?? 100,
+    buffer: o.buffer === "dd" ? o.dd + 100 : (o.buffer ?? 0),
+    minProfit: o.minProfit ?? 0, minRequest: o.minRequest ?? 0,
+    maxPayout: o.maxPayout ?? NOCAP, maxPayoutFirst: o.maxPayoutFirst ?? null,
+    payoutPct: o.payoutPct ?? 1, minDays: o.minDays ?? 0, minDayProfit: o.minDayProfit ?? 0,
+    consistency: o.consistency ?? 0, maxPayouts: o.maxPayouts ?? 0, split: o.split ?? 0.8,
+  };
+};
+const mkSizes = (list, base) => list.map(([size, per]) => ({ size, rules: mkRules(size, { ...base, ...per }) }));
+
+const MFFU_BUILDER = { lock: 100, evalFree: true, staticOffset: 100, minDays: 2, consistency: 50, maxPayouts: 5, split: 0.8 };
+const MFFU_RAPID = { lock: 100, staticOffset: 100, buffer: "dd", minDays: 1, minRequest: 500, minProfit: 500, split: 0.9 };
+const FN_BASE = { lock: 0, buffer: 0, minProfit: 500, minRequest: 250, split: 0.8 };
+const FN_RAPID = { lock: 0, staticOffset: 0, minProfit: 500, minRequest: 250, maxPayouts: 5, split: 0.9 };
+const FN_RAPID_SIZES = [[25000, { target: 1500, dd: 1000, maxPayout: 800 }], [50000, { target: 3000, dd: 2000, maxPayout: 1200 }], [100000, { target: 5000, dd: 2500, maxPayout: 2500, minRequest: 500 }]];
+const LUCID_BASE = { lock: 100, staticOffset: 100, split: 0.9, minRequest: 500 };
+const LUCID_SIZES = [[25000, { target: 1250, dd: 1000 }], [50000, { target: 3000, dd: 2000 }], [100000, { target: 6000, dd: 3000 }], [150000, { target: 9000, dd: 4500 }]];
+
+const PRESET_FIRMS = [
+  {
+    id: "mffu", name: "MFFU", full: "MyFundedFutures",
+    plans: [
+      {
+        id: "builder15", name: "Builder 1.500 DD",
+        note: T("Builder 50K Add-On: EOD-Trailing, 1.500$ MLL, Payout ab 2 Handelstagen pro Zyklus, max. 2.000$, 80/20, 50% Consistency, 5 Sim-Payouts.", "Builder 50K add-on: EOD trailing, $1,500 MLL, payout after 2 trading days per cycle, max $2,000, 80/20, 50% consistency, 5 sim payouts."),
+        sizes: mkSizes([[50000, { target: 3000, dd: 1500, buffer: 1600, minRequest: 500, minProfit: 500, maxPayout: 2000 }]], MFFU_BUILDER),
+      },
+      {
+        id: "builder", name: "Builder 2.000 DD",
+        note: T("Builder (Standard): EOD-Trailing, Payout ab 2 Handelstagen pro Zyklus, Cap je Groesse, 80/20, 50% Consistency, 5 Sim-Payouts.", "Builder (default): EOD trailing, payout after 2 trading days per cycle, cap by size, 80/20, 50% consistency, 5 sim payouts."),
+        sizes: mkSizes([
+          [25000, { target: 1500, dd: 1000, buffer: 1100, minRequest: 250, minProfit: 250, maxPayout: 1000 }],
+          [50000, { target: 3000, dd: 2000, buffer: 2100, minRequest: 500, minProfit: 500, maxPayout: 2000 }],
+          [100000, { target: 6000, dd: 3000, buffer: 3100, minRequest: 1000, minProfit: 1000, maxPayout: 3000 }],
+        ], MFFU_BUILDER),
+      },
+      {
+        id: "rapid", name: "Rapid",
+        note: T("Taegliche Payouts nach Buffer (MLL + 100$), kein Cap, keine Consistency im Funded, 90/10. Der Funded-Drawdown ist bei MFFU intraday-trailing — hier nur auf Tagesbasis (EOD) nachgebildet.", "Daily payouts after the buffer (MLL + $100), no cap, no funded consistency, 90/10. MFFU's funded drawdown is intraday trailing — only approximated on a daily (EOD) basis here."),
+        sizes: mkSizes([
+          [25000, { target: 1500, dd: 1000 }], [50000, { target: 3000, dd: 2000 }],
+          [100000, { target: 6000, dd: 3000 }], [150000, { target: 9000, dd: 4500 }],
+        ], MFFU_RAPID),
+      },
+    ],
+  },
+  {
+    id: "fn", name: "FundedNext", full: "FundedNext Futures",
+    plans: [
+      {
+        id: "rapid_daily", name: "Rapid Daily",
+        note: T("Payout taeglich nach Buffer, keine Consistency, 90/10, max. 5 Payouts. Das Daily Loss Limit (500/1.000/1.250$) wird nicht ueberwacht.", "Daily payouts after the buffer, no consistency, 90/10, max 5 payouts. The daily loss limit ($500/$1,000/$1,250) is not monitored."),
+        sizes: mkSizes(FN_RAPID_SIZES, { ...FN_RAPID, buffer: "dd", minDays: 1, consistency: 0 }),
+      },
+      {
+        id: "rapid_pro", name: "Rapid Pro",
+        note: T("Payout alle 3 Tage, kein Buffer, 40% Consistency im Funded, 90/10, max. 5 Payouts. Optionales Daily Loss Limit wird nicht ueberwacht.", "Payout every 3 days, no buffer, 40% funded consistency, 90/10, max 5 payouts. The optional daily loss limit is not monitored."),
+        sizes: mkSizes(FN_RAPID_SIZES, { ...FN_RAPID, buffer: 0, minDays: 3, consistency: 40 }),
+      },
+      {
+        id: "flex", name: "Flex",
+        note: T("Payout nach 5 Tagen mit je mind. 200$ (150K: 250$), 50% vom Profit bis Cap, 80/20, kein Buffer, max. 5 Payouts. Der optionale hoehere Split (Add-on) ist nicht abgebildet.", "Payout after 5 days with at least $200 each ($250 on 150K), 50% of profit up to the cap, 80/20, no buffer, max 5 payouts. The optional higher split (add-on) is not modeled."),
+        sizes: mkSizes([
+          [50000, { target: 2500, dd: 1500, maxPayout: 1500, minDayProfit: 200 }],
+          [100000, { target: 5000, dd: 2500, maxPayout: 2500, minDayProfit: 200 }],
+          [150000, { target: 8000, dd: 4000, maxPayout: 4000, minDayProfit: 250 }],
+        ], { ...FN_BASE, staticOffset: 100, payoutPct: 0.5, minDays: 5, consistency: 0, maxPayouts: 5 }),
+      },
+      {
+        id: "legacy", name: "Legacy",
+        note: T("Payout nach 5 Benchmark-Tagen, 50% vom Profit bis Cap, 80/20, keine Consistency im Funded. Nach 30 Benchmark-Tagen entfaellt der Cap (nicht abgebildet).", "Payout after 5 benchmark days, 50% of profit up to the cap, 80/20, no funded consistency. The cap is lifted after 30 benchmark days (not modeled)."),
+        sizes: mkSizes([
+          [25000, { target: 1250, dd: 1000, maxPayout: 3000, minDayProfit: 100 }],
+          [50000, { target: 3000, dd: 2000, maxPayout: 6000, minDayProfit: 200 }],
+          [100000, { target: 6000, dd: 3000, maxPayout: 6000, minDayProfit: 200 }],
+        ], { ...FN_BASE, staticOffset: 0, payoutPct: 0.5, minDays: 5, consistency: 0, maxPayouts: 0 }),
+      },
+    ],
+  },
+  {
+    id: "lucid", name: "Lucid", full: "Lucid Trading",
+    plans: [
+      {
+        id: "flex", name: "Flex",
+        note: T("Payout nach 5 Tagen mit je mind. 100/150/200/250$ (je Groesse), positiver Zyklus, 50% vom Profit bis Cap, kein Buffer, 90/10, 5 Payouts.", "Payout after 5 days with at least $100/$150/$200/$250 each (by size), positive cycle, 50% of profit up to the cap, no buffer, 90/10, 5 payouts."),
+        sizes: mkSizes([
+          [25000, { target: 1250, dd: 1000, maxPayout: 1000, minDayProfit: 100 }],
+          [50000, { target: 3000, dd: 2000, maxPayout: 2000, minDayProfit: 150 }],
+          [100000, { target: 6000, dd: 3000, maxPayout: 2500, minDayProfit: 200 }],
+          [150000, { target: 9000, dd: 4500, maxPayout: 3000, minDayProfit: 250 }],
+        ], { ...LUCID_BASE, buffer: 0, minProfit: 0, payoutPct: 0.5, minDays: 5, consistency: 0, maxPayouts: 5 }),
+      },
+      {
+        id: "pro", name: "Pro",
+        note: T("Profit-Ziel pro Zyklus (250/500/750/1.000$), 40% Consistency, Buffer = MLL + 100$, erster Payout mit niedrigerem Cap, 90/10, 5 Payouts.", "Profit goal per cycle ($250/$500/$750/$1,000), 40% consistency, buffer = MLL + $100, first payout with a lower cap, 90/10, 5 payouts."),
+        sizes: mkSizes([
+          [25000, { target: 1250, dd: 1000, minProfit: 250, maxPayoutFirst: 1000, maxPayout: 1500 }],
+          [50000, { target: 3000, dd: 2000, minProfit: 500, maxPayoutFirst: 2000, maxPayout: 2500 }],
+          [100000, { target: 6000, dd: 3000, minProfit: 750, maxPayoutFirst: 2500, maxPayout: 3000 }],
+          [150000, { target: 9000, dd: 4500, minProfit: 1000, maxPayoutFirst: 3000, maxPayout: 3500 }],
+        ], { ...LUCID_BASE, buffer: "dd", minDays: 0, consistency: 40, maxPayouts: 5 }),
+      },
+      {
+        id: "daily", name: "Daily",
+        note: T("Payout taeglich fuer Profit ueber dem Buffer (MLL + 100$), keine Consistency, 90/10. Funded-Drawdown ist intraday — hier nur EOD nachgebildet. Bei US-News flat sein.", "Daily payouts for profit above the buffer (MLL + $100), no consistency, 90/10. Funded drawdown is intraday — only approximated as EOD here. Be flat around US news."),
+        sizes: mkSizes(LUCID_SIZES, { ...LUCID_BASE, buffer: "dd", minProfit: 0, minDays: 0, consistency: 0, maxPayouts: 0 }),
+      },
+    ],
+  },
+];
+const DEFAULT_PRESET = { firm: "mffu", plan: "builder15", size: 50000 };
+const DEFAULT_RULES = PRESET_FIRMS[0].plans[0].sizes[0].rules;
+const presetLabel = (firm, plan, size) => `${firm.name} ${plan.name} ${sizeK(size)}`;
+function presetLabelOf(p) {
+  const firm = PRESET_FIRMS.find((f) => f.id === (p && p.firm));
+  const plan = firm && firm.plans.find((x) => x.id === p.plan);
+  return firm && plan ? presetLabel(firm, plan, p.size) : "";
+}
+const splitText = (s) => `${Math.round(s * 100)}/${100 - Math.round(s * 100)}`;
+function payoutCapText(r) {
+  const cap = r.maxPayout >= NOCAP ? T("ohne Cap", "no cap") : `max. ${usd0(r.maxPayout)}`;
+  const first = r.maxPayoutFirst != null && r.maxPayoutFirst !== r.maxPayout ? T(` (1. Payout ${usd0(r.maxPayoutFirst)})`, ` (1st payout ${usd0(r.maxPayoutFirst)})`) : "";
+  const pct = r.payoutPct < 1 ? T(`${Math.round(r.payoutPct * 100)}% vom Profit, `, `${Math.round(r.payoutPct * 100)}% of profit, `) : "";
+  return `${pct}${cap}${first}`;
+}
+// Aktuelle (angewendete) Payout-Regeln als Text, z. B. fuer die Payout-Karte
+const currentPayoutCapText = () => payoutCapText({ maxPayout: PAYOUT_MAX_AMOUNT, maxPayoutFirst: PAYOUT_MAX_FIRST === PAYOUT_MAX_AMOUNT ? null : PAYOUT_MAX_FIRST, payoutPct: PAYOUT_PCT });
+function rulesShort(r) {
+  return T(
+    `Ziel +${usd0(r.target)} · MLL ${usd0(r.fundedDD)} · Payout ${payoutCapText(r)}, ${splitText(r.split)}`,
+    `Target +${usd0(r.target)} · MLL ${usd0(r.fundedDD)} · Payout ${payoutCapText(r)}, ${splitText(r.split)}`
+  );
+}
+function rulesLines(r) {
+  const days = r.minDays > 0
+    ? T(`${r.minDays} ${r.minDayProfit > 0 ? `Tage mit mind. ${usd0(r.minDayProfit)}` : "Handelstage"} pro Zyklus`, `${r.minDays} ${r.minDayProfit > 0 ? `days with at least ${usd0(r.minDayProfit)}` : "trading days"} per cycle`)
+    : T("keine Mindesttage", "no minimum days");
+  const buffer = r.buffer > 0 ? T(`Buffer ${usd0(r.buffer)}`, `buffer ${usd0(r.buffer)}`) : T("kein Buffer", "no buffer");
+  const cons = r.consistency > 0 ? T(`${r.consistency}% Consistency`, `${r.consistency}% consistency`) : T("keine Consistency", "no consistency");
+  const need = Math.max(r.minProfit, r.minRequest / (r.payoutPct || 1));
+  return [
+    T(`Eval: Ziel +${usd0(r.target)} (bis ${usd0(r.size + r.target)}), MLL ${usd0(r.evalDD)} EOD-trailing`, `Eval: target +${usd0(r.target)} (to ${usd0(r.size + r.target)}), MLL ${usd0(r.evalDD)} EOD trailing`),
+    T(`Funded: MLL ${usd0(r.fundedDD)}, Floor sperrt bei ${usd0(r.fundedCap - r.fundedDD)}, nach dem 1. Payout fix bei ${usd0(r.size + r.staticOffset)}`, `Funded: MLL ${usd0(r.fundedDD)}, floor locks at ${usd0(r.fundedCap - r.fundedDD)}, fixed at ${usd0(r.size + r.staticOffset)} after the 1st payout`),
+    T(`Payout: ${buffer}, ${days}, ${cons}`, `Payout: ${buffer}, ${days}, ${cons}`),
+    T(`Auszahlung: mind. ${usd0(need)} Profit, ${payoutCapText(r)}, Split ${splitText(r.split)}${r.maxPayouts > 0 ? `, max. ${r.maxPayouts} Payouts` : ""}`, `Payout amount: at least ${usd0(need)} profit, ${payoutCapText(r)}, split ${splitText(r.split)}${r.maxPayouts > 0 ? `, max ${r.maxPayouts} payouts` : ""}`),
+  ];
+}
+
+function applyAccountRules(rules) {
+  const x = { ...DEFAULT_RULES, ...(rules || {}) };
+  STARTING_BALANCE = x.size;
+  ACCOUNT_PASS_TARGET = x.size + x.target;
+  EVAL_DD_BUFFER = x.evalDD;
+  EVAL_DD_PEAK_CAP = x.evalCap == null ? Infinity : x.evalCap;
+  DD_BUFFER = x.fundedDD;
+  DD_PEAK_CAP = x.fundedCap;
+  PAYOUT_DD_PEAK_CAP = x.fundedCap;
+  MLL_AFTER_FIRST_PAYOUT = x.size + x.staticOffset;
+  PAYOUT_BUFFER = x.buffer;
+  PAYOUT_MIN_REQUEST = x.minRequest;
+  PAYOUT_PCT = x.payoutPct || 1;
+  PAYOUT_MIN_NET_PROFIT = Math.max(x.minProfit, x.minRequest / PAYOUT_PCT);
+  PAYOUT_MAX_AMOUNT = x.maxPayout;
+  PAYOUT_MAX_FIRST = x.maxPayoutFirst != null ? x.maxPayoutFirst : x.maxPayout;
+  PAYOUT_MIN_DAYS = x.minDays;
+  PAYOUT_MIN_DAY_PROFIT = x.minDayProfit;
+  PAYOUT_CONSISTENCY_PCT = x.consistency;
+  PAYOUT_MAX_SIM = x.maxPayouts;
+  PAYOUT_SPLIT = x.split;
+  // Der alte Hauptaccount behaelt seinen bekannten realen Funded-Stand (Profil-Override), alle anderen starten bei der Kontogroesse.
+  FUNDED_BALANCE_OVERRIDE = ACTIVE_PROFILE && ACTIVE_PROFILE.fundedBalanceOverride != null && ACTIVE_ACCOUNT_ID === MAIN_ACCOUNT_ID
+    ? ACTIVE_PROFILE.fundedBalanceOverride
+    : STARTING_BALANCE;
+}
+function activeAccountRules() {
+  try {
+    const a = loadAccounts().find((x) => x.id === ACTIVE_ACCOUNT_ID);
+    return a && a.rules ? a.rules : null;
+  } catch { return null; }
+}
+window.__applyRules = () => applyAccountRules(activeAccountRules());
+window.__applyRules();
+
 const PLAN_COLUMN_WARNING = T(
   "Spalte \"plan_followed\" fehlt in Supabase — die Plan-Angabe wurde NICHT gespeichert (SQL siehe oben im Code).",
   "Column \"plan_followed\" is missing in Supabase — the plan flag was NOT saved (see SQL at the top of the code)."
+);
+
+const ACCOUNT_COLUMN_ERROR = T(
+  "Spalte \"account_id\" fehlt in Supabase — Trades fuer weitere Accounts koennen erst nach dem Datenbank-Update gespeichert werden (Hinweis oben: „SQL kopieren“).",
+  "Column \"account_id\" is missing in Supabase — trades for additional accounts can only be saved after the database update (see the notice at the top: “Copy SQL”)."
 );
 
 // Mindestanzahl an Trades, ab der eine Confluence-Kombination im "Top-Kombinationen"-Ranking
@@ -1331,7 +1601,7 @@ function TradingJournal() {
       return Array.isArray(c) ? c : null;
     } catch { return null; }
   });
-  const [trades, setTrades] = useState(cachedTrades || []);
+  const [allTrades, setTrades] = useState(cachedTrades || []);
   const [loading, setLoading] = useState(!cachedTrades);
   const [error, setError] = useState(null);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -1347,6 +1617,33 @@ function TradingJournal() {
   const [filterSymbol, setFilterSymbol] = useState("all");
   const [filterResult, setFilterResult] = useState("all");
   const { toasts, push: pushToast } = useToasts();
+
+  // ── Accounts: mehrere Konten pro Profil (Eval / XFA, beliebig kombinierbar) ──
+  // allTrades = alles aus der Datenbank. accountTrades = nur das aktive Konto (Balance, Drawdown, Payout).
+  // trades = was Kalender, Stats und Analyse zeigen: aktuelles Konto oder "All time" (alle Konten).
+  const [accounts, setAccounts] = useState(() => loadAccounts());
+  const [scopeMode, setScopeModeState] = useState(() => {
+    try { return localStorage.getItem("journal_scope_mode") === "all" ? "all" : "current"; } catch { return "current"; }
+  });
+  const setScopeMode = useCallback((m) => {
+    setScopeModeState(m);
+    try { localStorage.setItem("journal_scope_mode", m); } catch {}
+  }, []);
+  const [accountPanel, setAccountPanel] = useState(null); // null | "add" | "reset"
+  const [accountBusy, setAccountBusy] = useState(false);
+  const activeAccount = useMemo(
+    () => accounts.find((a) => a.id === ACTIVE_ACCOUNT_ID)
+      || { id: ACTIVE_ACCOUNT_ID, name: ACTIVE_ACCOUNT_ID === MAIN_ACCOUNT_ID ? T("Hauptaccount", "Main account") : ACTIVE_ACCOUNT_ID, type: "eval", archived: false },
+    [accounts]
+  );
+  const accountTrades = useMemo(() => allTrades.filter((t) => accountOf(t) === ACTIVE_ACCOUNT_ID), [allTrades]);
+  const trades = scopeMode === "all" ? allTrades : accountTrades;
+  const otherTradeCount = allTrades.length - accountTrades.length;
+  const switchAccount = (id) => {
+    if (id === ACTIVE_ACCOUNT_ID) return;
+    try { localStorage.setItem(ACTIVE_ACCOUNT_LS_KEY, id); } catch {}
+    window.location.reload();
+  };
 
   // ── Funded Stage: wird einmalig aktiviert sobald Balance >= 53k ──
   // Ab diesem Zeitpunkt startet der Account neu auf 50k.
@@ -1449,6 +1746,96 @@ function TradingJournal() {
     pushToast(T("Funded Stage wiederhergestellt", "Funded stage restored"));
   }, [pushToast]);
 
+  // Funded-Stage-Schnitt: Eval-Trades (vor der Aktivierung) werden nur in der Ansicht "Aktueller Account" aus Stats/Kalender
+  // herausgerechnet. In der All-time-Ansicht zaehlt alles.
+  const fundedCut = scopeMode === "all" ? null : (fundedStage && fundedActivatedAt ? fundedActivatedAt : null);
+
+  const updateAccounts = useCallback((fn) => {
+    setAccounts((prev) => {
+      const next = fn(prev);
+      saveAccounts(next);
+      return next;
+    });
+  }, []);
+
+  // Neu angelegter XFA-Account: Funded Stage direkt aktivieren (einmalig beim ersten Oeffnen des Accounts).
+  useEffect(() => {
+    if (!activeAccount.init) return;
+    if (activeAccount.init === "xfa") {
+      const d = localIsoToday();
+      const dt = new Date().toISOString();
+      try {
+        localStorage.setItem("journal_funded_stage", "1");
+        localStorage.setItem("journal_funded_start_date", d);
+        localStorage.setItem("journal_funded_activated_at", dt);
+      } catch {}
+      setFundedStage(true);
+      setFundedStartDate(d);
+      setFundedActivatedAt(dt);
+    }
+    updateAccounts((prev) => prev.map((a) => (a.id === ACTIVE_ACCOUNT_ID ? { ...a, init: null } : a)));
+  }, []);
+
+  // Typ-Label (Eval / XFA) des aktiven Accounts in der Account-Liste aktuell halten (fuer die Chips der anderen Accounts).
+  useEffect(() => {
+    if (activeAccount.init) return;
+    const type = fundedStage ? "xfa" : "eval";
+    const cur = accounts.find((a) => a.id === ACTIVE_ACCOUNT_ID);
+    if (cur && cur.type === type) return;
+    updateAccounts((prev) => {
+      const base = prev.some((a) => a.id === ACTIVE_ACCOUNT_ID) ? prev : [...prev, { ...activeAccount }];
+      return base.map((a) => (a.id === ACTIVE_ACCOUNT_ID ? { ...a, type } : a));
+    });
+  }, [fundedStage]);
+
+  // Neuen Account anlegen. Bei "Account Reset" (archiveCurrent) wird der aktuelle Account archiviert; seine Trades
+  // bleiben gespeichert und erscheinen nur in der All-time-Ansicht. Danach wird der neue Account geoeffnet.
+  const createAccount = useCallback(async ({ name, type, preset, rules, archiveCurrent }) => {
+    if (archiveCurrent && !window.confirm(T(
+      `Account "${activeAccount.name}" archivieren und mit einem neuen, leeren Account starten? Die alten Trades bleiben gespeichert und sind ueber "All time" weiter sichtbar.`,
+      `Archive account "${activeAccount.name}" and start a new, empty account? The old trades stay saved and remain visible under "All time".`
+    ))) return;
+    setAccountBusy(true);
+    const id = `acc_${Date.now().toString(36)}`;
+    const now = new Date().toISOString();
+    let list = accounts.some((a) => a.id === ACTIVE_ACCOUNT_ID) ? accounts : [...accounts, { ...activeAccount }];
+    if (archiveCurrent) {
+      list = list.map((a) => (a.id === ACTIVE_ACCOUNT_ID ? { ...a, archived: true, endedAt: now, type: fundedStage ? "xfa" : "eval" } : a));
+    }
+    list = [...list, { id, name, type, createdAt: now, archived: false, init: type === "xfa" ? "xfa" : null, ...(preset ? { preset } : {}), ...(rules ? { rules } : {}) }];
+    saveAccounts(list);
+    try {
+      localStorage.setItem(ACTIVE_ACCOUNT_LS_KEY, id);
+      localStorage.setItem("journal_scope_mode", "current");
+    } catch {}
+    // Kurz warten, bis die Account-Liste in der Datenbank angekommen ist (sonst gewinnt beim Neuladen der alte Stand).
+    try { await Promise.race([window.__lastPush, new Promise((r) => setTimeout(r, 3000))]); } catch {}
+    window.location.reload();
+  }, [accounts, activeAccount, fundedStage]);
+
+  // Aktiven Account loeschen (z. B. versehentlich angelegt). Der Hauptaccount bleibt immer erhalten. Seine Trades bleiben
+  // gespeichert (nur in "All time" sichtbar). Entstand der Account durch einen Reset, wird der archivierte Vorgaenger
+  // wieder aktiviert; sonst wird zum letzten offenen Account gewechselt.
+  const deleteAccount = useCallback(async () => {
+    if (ACTIVE_ACCOUNT_ID === MAIN_ACCOUNT_ID) return;
+    const n = accountTrades.length;
+    if (!window.confirm(T(
+      `Account "${activeAccount.name}" löschen?${n > 0 ? ` Seine ${n} Trades bleiben gespeichert und sind nur über "All time" sichtbar.` : ""}`,
+      `Delete account "${activeAccount.name}"?${n > 0 ? ` Its ${n} trades stay saved and are only visible under "All time".` : ""}`
+    ))) return;
+    setAccountBusy(true);
+    let list = accounts.filter((a) => a.id !== ACTIVE_ACCOUNT_ID);
+    const created = activeAccount.createdAt;
+    const prev = created ? list.find((a) => a.archived && a.endedAt === created) : null;
+    let next = prev || [...list].reverse().find((a) => !a.archived) || list.find((a) => a.id === MAIN_ACCOUNT_ID);
+    if (prev) list = list.map((a) => (a.id === prev.id ? { ...a, archived: false } : a));
+    const nextId = next ? next.id : MAIN_ACCOUNT_ID;
+    saveAccounts(list);
+    try { localStorage.setItem(ACTIVE_ACCOUNT_LS_KEY, nextId); } catch {}
+    try { await Promise.race([window.__lastPush, new Promise((r) => setTimeout(r, 3000))]); } catch {}
+    window.location.reload();
+  }, [accounts, activeAccount, accountTrades]);
+
   const filteredTrades = useMemo(() => {
     return trades.filter((t) => {
       if (filterSymbol !== "all" && t.symbol !== filterSymbol) return false;
@@ -1461,11 +1848,11 @@ function TradingJournal() {
 
   // Basis fuer Analyse-Panel: wie die Performance-Stats (Funded-Stage beachtet, ab STATS_CUTOFF_DATE)
   const analysisTrades = useMemo(() => {
-    const base = fundedStage && fundedActivatedAt
-      ? filteredTrades.filter((t) => t.created_at && t.created_at >= fundedActivatedAt)
+    const base = fundedCut
+      ? filteredTrades.filter((t) => t.created_at && t.created_at >= fundedCut)
       : filteredTrades;
     return base.filter((t) => t.trade_date >= STATS_CUTOFF_DATE);
-  }, [filteredTrades, fundedStage, fundedActivatedAt]);
+  }, [filteredTrades, fundedCut]);
 
   // Bereits verwendete Setup-Namen (für Autovervollständigung im Formular)
   const existingSetups = useMemo(() => {
@@ -1652,11 +2039,11 @@ function TradingJournal() {
     if (!dayDetail) return null;
     const dayTrades = filteredTrades.filter((t) => t.trade_date === dayDetail);
     const pnl = dayTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
-    const isHistoric = fundedStage && fundedActivatedAt
-      ? dayTrades.length > 0 && dayTrades.every((t) => !t.created_at || t.created_at < fundedActivatedAt)
+    const isHistoric = fundedCut
+      ? dayTrades.length > 0 && dayTrades.every((t) => !t.created_at || t.created_at < fundedCut)
       : false;
     return { iso: dayDetail, trades: dayTrades, pnl, isHistoric };
-  }, [dayDetail, filteredTrades, fundedStage, fundedActivatedAt]);
+  }, [dayDetail, filteredTrades, fundedCut]);
 
   const loadTrades = useCallback(async () => {
     if (!isConfigured) {
@@ -1690,11 +2077,11 @@ function TradingJournal() {
 
     // In der Funded Stage zaehlen nur Trades die NACH dem Aktivierungs-Zeitpunkt
     // gespeichert wurden. So werden Eval-Trades vom selben Tag korrekt ausgeschlossen.
-    const fundedTrades = fundedStage && fundedActivatedAt
-      ? sorted.filter((t) => t.created_at && t.created_at >= fundedActivatedAt)
+    const fundedTrades = fundedCut
+      ? sorted.filter((t) => t.created_at && t.created_at >= fundedCut)
       : sorted;
-    const evalHistoricTrades = fundedStage && fundedActivatedAt
-      ? sorted.filter((t) => !t.created_at || t.created_at < fundedActivatedAt)
+    const evalHistoricTrades = fundedCut
+      ? sorted.filter((t) => !t.created_at || t.created_at < fundedCut)
       : [];
 
     // Alte-Strategie-Cutoff: fuer die Performance-Stats zaehlen nur Trades ab
@@ -1853,7 +2240,7 @@ function TradingJournal() {
       tradingDays, eodPeak, eodBalance, mll, ddBufferRemaining, ddRiskPct,
       distanceToPass, passProgressPct, accountPassed,
     };
-  }, [filteredTrades, fundedStage, fundedActivatedAt]);
+  }, [filteredTrades, fundedCut]);
 
   // ── Account-Stats (IMMER auf Basis ALLER Trades, unabhängig von Symbol-/Ergebnis-Filtern) ──
   // Balance, Equity-Kurve, Drawdown/MLL und Pass-Status sind reale Kontokennzahlen.
@@ -1861,7 +2248,7 @@ function TradingJournal() {
   // zum Browsen des Kalenders/der Insights benutzt — sonst könnte z. B. ein aktiver
   // "Losses"-Filter fälschlich einen bestandenen Drawdown-Breach verstecken.
   const accountStats = useMemo(() => {
-    const sorted = [...trades].sort(
+    const sorted = [...accountTrades].sort(
       (a, b) => new Date(a.trade_date) - new Date(b.trade_date) || a.id - b.id
     );
 
@@ -1919,7 +2306,7 @@ function TradingJournal() {
     const activeDdPeakCap = fundedStage ? DD_PEAK_CAP : EVAL_DD_PEAK_CAP;
     const cappedPeak = Math.min(eodPeak, activeDdPeakCap);
     // Nach dem ersten Payout ist die MLL statisch (Start + 100$)
-    const mll = fundedStage && payoutCount > 0 ? MLL_AFTER_FIRST_PAYOUT : cappedPeak - activeDdBuffer;
+    const mll = fundedStage && payoutCount > 0 && PAYOUT_STATIC_AFTER ? MLL_AFTER_FIRST_PAYOUT : cappedPeak - activeDdBuffer;
     const ddBufferRemaining = balance - mll;
     const ddMaxSpan = Math.max(1, eodPeak - mll);
     const ddRiskPct = Math.max(0, Math.min(100, 100 - (ddBufferRemaining / ddMaxSpan) * 100));
@@ -1933,7 +2320,7 @@ function TradingJournal() {
       tradingDays, eodPeak, eodBalance, mll, ddBufferRemaining, ddRiskPct,
       distanceToPass, passProgressPct, accountPassed,
     };
-  }, [trades, fundedStage, fundedActivatedAt, payoutTotal, payoutCount]);
+  }, [accountTrades, fundedStage, fundedActivatedAt, payoutTotal, payoutCount]);
 
   // ── Payout-Phase Stats ──
   // Aktiv sobald "Eval Passed" gesetzt ist. Zählt nur Trading-Tage ab dem
@@ -1950,23 +2337,34 @@ function TradingJournal() {
 
 
     // Min. Handelstage pro Zyklus (Builder 50K): mind. 2 Tage mit Trades seit Start bzw. letztem Payout.
-    const qualifyingDays = relevantDays; // jeder Handelstag im Zyklus zaehlt
-    const effectiveQualifyingCount = qualifyingDays.length;
-    const daysHit = Math.min(effectiveQualifyingCount, PAYOUT_MIN_DAYS);
-    const daysPassed = effectiveQualifyingCount >= PAYOUT_MIN_DAYS;
+    // Je nach Plan zaehlt jeder Handelstag, nur Tage ab einem Mindestgewinn (Benchmark-/Qualifying-Tage)
+    // oder die vergangenen Kalendertage seit Zyklus-Start (z. B. MFFU Pro: 14 Tage).
+    const qualifyingDays = PAYOUT_MIN_DAY_PROFIT > 0 ? relevantDays.filter((d) => d.pnl >= PAYOUT_MIN_DAY_PROFIT) : relevantDays;
+    let effectiveQualifyingCount = qualifyingDays.length;
+    if (PAYOUT_CAL_DAYS > 0) {
+      const cycleStartIso = lastPayoutDate || (relevantDays.length ? relevantDays[0].date : null);
+      effectiveQualifyingCount = cycleStartIso
+        ? Math.max(0, Math.floor((Date.now() - new Date(`${cycleStartIso}T00:00:00`).getTime()) / 86400000))
+        : 0;
+    }
+    const neededDays = PAYOUT_CAL_DAYS > 0 ? PAYOUT_CAL_DAYS : PAYOUT_MIN_DAYS;
+    const daysHit = Math.min(effectiveQualifyingCount, neededDays);
+    const daysPassed = effectiveQualifyingCount >= neededDays;
 
     // Erster Payout: Gewinn ueber dem Buffer (Start + 1.600$). Danach: Netto-Gewinn seit letztem Payout.
     const cycleNetProfit = relevantDays.reduce((s, d) => s + d.pnl, 0);
     const profitAboveBuffer = lastPayoutDate ? cycleNetProfit : accountStats.balance - (STARTING_BALANCE + PAYOUT_BUFFER);
-    const profitPassed = profitAboveBuffer >= PAYOUT_MIN_NET_PROFIT;
-    const payoutAmount = Math.max(0, Math.min(profitAboveBuffer, PAYOUT_MAX_AMOUNT));
+    const profitPassed = profitAboveBuffer > 0 && profitAboveBuffer >= PAYOUT_MIN_NET_PROFIT;
+    // Auszahlbar: PAYOUT_PCT vom Profit (z. B. 50 % bei Flex/Legacy), gedeckelt durch das Cap (1. Payout ggf. eigenes Cap)
+    const payoutCapNow = payoutCount > 0 ? PAYOUT_MAX_AMOUNT : PAYOUT_MAX_FIRST;
+    const payoutAmount = Math.max(0, Math.min(profitAboveBuffer * PAYOUT_PCT, payoutCapNow));
 
     // 50%-Consistency-Regel: kein einzelner Tag darf mehr als 50% des
     // gesamten Nettogewinns seit Eval-Passed ausmachen
     const netProfitSincePass = relevantDays.reduce((s, d) => s + d.pnl, 0);
     const biggestDay = relevantDays.length ? Math.max(...relevantDays.map((d) => d.pnl)) : 0;
     const consistencyPct = netProfitSincePass > 0 ? (biggestDay / netProfitSincePass) * 100 : 0;
-    const consistencyPassed = netProfitSincePass <= 0 || consistencyPct <= PAYOUT_CONSISTENCY_PCT;
+    const consistencyPassed = PAYOUT_CONSISTENCY_PCT <= 0 || netProfitSincePass <= 0 || consistencyPct <= PAYOUT_CONSISTENCY_PCT;
 
     // Payout-eigener Drawdown-Cap: identische Logik wie die Eval-MLL, aber
     // der Cap-Peak endet bereits bei 52.100 statt 52.000. eodPeak startet bei
@@ -1979,7 +2377,7 @@ function TradingJournal() {
       if (eodBalance > eodPeak) eodPeak = eodBalance;
     });
     const cappedPeak = Math.min(eodPeak, PAYOUT_DD_PEAK_CAP);
-    const mll = payoutCount > 0 ? MLL_AFTER_FIRST_PAYOUT : cappedPeak - DD_BUFFER;
+    const mll = payoutCount > 0 && PAYOUT_STATIC_AFTER ? MLL_AFTER_FIRST_PAYOUT : cappedPeak - DD_BUFFER;
     const balance = accountStats.balance;
     const ddBufferRemaining = balance - mll;
     const ddMaxSpan = Math.max(1, eodPeak - mll);
@@ -1988,7 +2386,7 @@ function TradingJournal() {
     const allRulesPassed = daysPassed && consistencyPassed && profitPassed;
 
     return {
-      relevantDays, qualifyingDays, effectiveQualifyingCount, daysHit, daysPassed,
+      relevantDays, qualifyingDays, effectiveQualifyingCount, neededDays, daysHit, daysPassed,
       netProfitSincePass, biggestDay, consistencyPct, consistencyPassed,
       eodPeak, mll, ddBufferRemaining, ddRiskPct,
       allRulesPassed, cycleNetProfit, profitAboveBuffer, profitPassed, payoutAmount,
@@ -2015,18 +2413,21 @@ function TradingJournal() {
       const iso = isoDate(year, month, day);
       const dayTrades = byDay.get(iso) || [];
       // In funded stage: Eval-Trades (created_at vor Aktivierung) sind "historic"
-      const isHistoric = fundedStage && fundedActivatedAt && iso < (fundedStartDate || "9999");
+      const isHistoric = fundedCut && iso < (fundedStartDate || "9999");
       // Ein Tag gilt als historic wenn ALLE seine Trades historic sind
-      const allHistoric = isHistoric && dayTrades.every((t) => !t.created_at || t.created_at < fundedActivatedAt);
-      const activeTrades = fundedStage && fundedActivatedAt
-        ? dayTrades.filter((t) => t.created_at && t.created_at >= fundedActivatedAt)
+      const allHistoric = isHistoric && dayTrades.every((t) => !t.created_at || t.created_at < fundedCut);
+      const activeTrades = fundedCut
+        ? dayTrades.filter((t) => t.created_at && t.created_at >= fundedCut)
         : dayTrades;
-      const hasHistoricTrades = fundedStage && fundedActivatedAt
-        ? dayTrades.some((t) => !t.created_at || t.created_at < fundedActivatedAt)
+      const hasHistoricTrades = fundedCut
+        ? dayTrades.some((t) => !t.created_at || t.created_at < fundedCut)
         : false;
+      // All-time-Ansicht: Tage, an denen ausschliesslich Trades anderer Accounts liegen, werden markiert
+      const isOther = scopeMode === "all" && dayTrades.length > 0 && dayTrades.every((t) => accountOf(t) !== ACTIVE_ACCOUNT_ID);
+      const otherName = isOther ? ((accounts.find((a) => a.id === accountOf(dayTrades[0])) || {}).name || "") : "";
       const pnl = activeTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
       const rawPnl = dayTrades.reduce((s, t) => s + Number(t.pnl || 0), 0);
-      cells.push({ day, iso, trades: dayTrades, pnl, rawPnl, isHistoric: allHistoric && activeTrades.length === 0, hasHistoricTrades });
+      cells.push({ day, iso, trades: dayTrades, pnl, rawPnl, isHistoric: allHistoric && activeTrades.length === 0, hasHistoricTrades, isOther, otherName });
     }
     while (cells.length % 7 !== 0) cells.push(null);
 
@@ -2044,7 +2445,7 @@ function TradingJournal() {
 
     const monthTotal = Array.from(byDay.values())
       .flat()
-      .filter((t) => !fundedStage || !fundedActivatedAt || (t.created_at && t.created_at >= fundedActivatedAt))
+      .filter((t) => !fundedCut || (t.created_at && t.created_at >= fundedCut))
       .reduce((s, t) => s + Number(t.pnl || 0), 0);
     const monthTradeCount = Array.from(byDay.values()).flat().length;
 
@@ -2052,7 +2453,7 @@ function TradingJournal() {
     const showWeekend = weeks.some((w) => w.cells.slice(5).some((c) => c && c.trades.length > 0));
 
     return { weeks, monthTotal, monthTradeCount, showWeekend };
-  }, [filteredTrades, cursor, fundedStage, fundedActivatedAt, fundedStartDate]);
+  }, [filteredTrades, cursor, fundedCut, fundedStartDate, scopeMode, accounts]);
 
   // Postet einen Trade zu Supabase; fällt automatisch auf ein Payload ohne
   // "realized_rr" zurück, falls diese Spalte in der Tabelle noch nicht existiert
@@ -2062,6 +2463,14 @@ function TradingJournal() {
     let res = await fetch(REST_URL, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
     if (!res.ok) {
       let body = await res.text();
+      if (/account_id/i.test(body) && payload.account_id !== undefined) {
+        // Spalte fehlt: fuer den Hauptaccount unkritisch (Trades ohne account_id gehoeren dazu), fuer weitere Accounts nicht.
+        if (payload.account_id !== MAIN_ACCOUNT_ID) throw new Error(ACCOUNT_COLUMN_ERROR);
+        const { account_id, ...rest } = payload;
+        payload = rest;
+        res = await fetch(REST_URL, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
+        if (!res.ok) body = await res.text();
+      }
       if (/realized_rr/i.test(body) && payload.realized_rr !== undefined) {
         const { realized_rr, ...rest } = payload;
         payload = rest;
@@ -2093,7 +2502,8 @@ function TradingJournal() {
   };
 
   const handleAddTrade = useCallback(
-    async (trade) => {
+    async (tradeIn) => {
+      const trade = { ...tradeIn, account_id: ACTIVE_ACCOUNT_ID };
       setSaving(true);
       setError(null);
       try {
@@ -2349,6 +2759,7 @@ alter table "Trades" add column if not exists screenshot text;
 alter table "Trades" add column if not exists setup text;
 alter table "Trades" add column if not exists confluences text[];
 alter table "Trades" add column if not exists plan_followed boolean;
+alter table "Trades" add column if not exists account_id text;
 create table if not exists "Settings" (key text primary key, value text, updated_at timestamptz not null default now());
 alter table "Trades" enable row level security;
 alter table "Settings" enable row level security;
@@ -2365,7 +2776,7 @@ notify pgrst, 'reload schema';`;
     (async () => {
       try {
         const probes = [
-          `${REST_URL}?select=risk_amount,realized_rr,setup,confluences,plan_followed&limit=1`,
+          `${REST_URL}?select=risk_amount,realized_rr,setup,confluences,plan_followed,account_id&limit=1`,
           `${String(SUPABASE_URL).replace(/\/+$/, "")}/rest/v1/Settings?select=key&limit=1`,
         ];
         const rs = await Promise.all(probes.map((u) => fetch(u, { headers: sbHeaders })));
@@ -2408,17 +2819,18 @@ notify pgrst, 'reload schema';`;
         if (panelOpen) setPanelOpen(false);
         else if (editingTrade) setEditingTrade(null);
         else if (dayDetail) setDayDetail(null);
+        else if (accountPanel && !accountBusy) setAccountPanel(null);
         return;
       }
       if (typing) return;
-      if ((e.key === "n" || e.key === "N") && !panelOpen && !editingTrade && !dayDetail) {
+      if ((e.key === "n" || e.key === "N") && !panelOpen && !editingTrade && !dayDetail && !accountPanel) {
         e.preventDefault();
         setPanelOpen(true);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [panelOpen, editingTrade, dayDetail]);
+  }, [panelOpen, editingTrade, dayDetail, accountPanel, accountBusy]);
 
   return (
     <div className="journal-shell">
@@ -2489,9 +2901,48 @@ notify pgrst, 'reload schema';`;
         </div>
       )}
 
+      <section className="acct-bar">
+        <div className="filter-group">
+          {accounts.filter((a) => !a.archived || a.id === ACTIVE_ACCOUNT_ID).map((a) => {
+            const isActive = a.id === ACTIVE_ACCOUNT_ID;
+            const isXfa = isActive ? fundedStage : a.type === "xfa";
+            return (
+              <button
+                key={a.id}
+                type="button"
+                className={`filter-chip ${isActive ? "active" : ""}`}
+                onClick={() => switchAccount(a.id)}
+              >
+                {a.name}<span className={`acct-tag ${isXfa ? "xfa" : ""}`}>{isXfa ? "XFA" : "EVAL"}</span>
+              </button>
+            );
+          })}
+        </div>
+        <button type="button" className="btn-secondary" onClick={() => setAccountPanel("add")}>
+          + {T("Account hinzufügen", "Add account")}
+        </button>
+        <button type="button" className="btn-secondary" onClick={() => setAccountPanel("reset")}>
+          {T("Account Reset", "Account reset")}
+        </button>
+        {ACTIVE_ACCOUNT_ID !== MAIN_ACCOUNT_ID && (
+          <button type="button" className="btn-secondary" disabled={accountBusy} onClick={deleteAccount}>
+            {T("Account löschen", "Delete account")}
+          </button>
+        )}
+        <div className="filter-spacer" />
+        <div className="filter-group">
+          <button type="button" className={`filter-chip ${scopeMode === "current" ? "active" : ""}`} onClick={() => setScopeMode("current")}>
+            {T("Aktueller Account", "Current account")}
+          </button>
+          <button type="button" className={`filter-chip ${scopeMode === "all" ? "active" : ""}`} onClick={() => setScopeMode("all")}>
+            {T("All time · alle Trades anzeigen", "All time · show all trades")}{otherTradeCount > 0 ? ` (+${otherTradeCount})` : ""}
+          </button>
+        </div>
+      </section>
+
       <section className="hero">
         <div className="hero-balance">
-          <span className="hero-label">Account Balance</span>
+          <span className="hero-label">Account Balance{accounts.length > 1 ? ` · ${activeAccount.name}` : ""}</span>
           <span className="hero-value">{fmtMoney(accountStats.balance)}</span>
           <span className={`hero-delta ${accountStats.totalPnl >= 0 ? "pos" : "neg"}`}>
             {accountStats.totalPnl >= 0 ? <Icon.Up /> : <Icon.Down />}
@@ -2532,7 +2983,7 @@ notify pgrst, 'reload schema';`;
         </div>
       )}
 
-      {!fundedStage && !fundedStartDate && (
+      {!fundedStage && !fundedStartDate && ACTIVE_ACCOUNT_ID === MAIN_ACCOUNT_ID && (
         <FundedStageRecovery onRestore={restoreFundedStage} />
       )}
 
@@ -2549,7 +3000,7 @@ notify pgrst, 'reload schema';`;
               <div className="risk-fill dd" style={{ width: `${accountStats.ddRiskPct}%` }} />
             </div>
             <div className="risk-meta">
-              <span>MLL: {fmtMoney(accountStats.mll)} {T("(trailing, 1.500$ Abstand)", "(trailing, $1,500 distance)")}</span>
+              <span>MLL: {fmtMoney(accountStats.mll)} {T(`(trailing, ${usd0(EVAL_DD_BUFFER)} Abstand)`, `(trailing, ${usd0(EVAL_DD_BUFFER)} distance)`)}</span>
               <span>{T("Puffer zur MLL:", "Buffer to MLL:")} {fmtMoneyShort(accountStats.ddBufferRemaining)}</span>
             </div>
           </div>
@@ -2611,16 +3062,18 @@ notify pgrst, 'reload schema';`;
             })()}
             <div className="risk-meta" style={{ marginTop: "2px" }}>
               <span>MLL: {fmtMoney(accountStats.mll)} · Balance: {fmtMoney(accountStats.balance)}</span>
-              <span>{accountStats.accountPassed ? T("Ziel erreicht", "Target reached") : T(`Noch ${fmtMoneyShort(-(ACCOUNT_PASS_TARGET - accountStats.balance))} bis 53k`, `Still ${fmtMoneyShort(-(ACCOUNT_PASS_TARGET - accountStats.balance))} until 53k`)}</span>
+              <span>{accountStats.accountPassed ? T("Ziel erreicht", "Target reached") : T(`Noch ${fmtMoneyShort(-(ACCOUNT_PASS_TARGET - accountStats.balance))} bis ${kfmt(ACCOUNT_PASS_TARGET)}`, `Still ${fmtMoneyShort(-(ACCOUNT_PASS_TARGET - accountStats.balance))} until ${kfmt(ACCOUNT_PASS_TARGET)}`)}</span>
             </div>
           </div>
         </div>
       ) : (
         <div className="payout-grid">
-          <div className="payout-card">
+          <div className="payout-card" style={PAYOUT_MIN_DAYS > 0 ? undefined : { display: "none" }}>
             <div className="payout-card-title">
               <span className={`payout-status-dot ${payoutStats.daysPassed ? "ok" : ""}`} />
-              {T("Mind. 2 Handelstage im Zyklus", "Min. 2 trading days per cycle")}
+              {PAYOUT_MIN_DAY_PROFIT > 0
+                ? T(`Mind. ${PAYOUT_MIN_DAYS} Tage mit je ${usd0(PAYOUT_MIN_DAY_PROFIT)}+ im Zyklus`, `Min. ${PAYOUT_MIN_DAYS} days with ${usd0(PAYOUT_MIN_DAY_PROFIT)}+ each per cycle`)
+                : T(`Mind. ${PAYOUT_MIN_DAYS} Handelstage im Zyklus`, `Min. ${PAYOUT_MIN_DAYS} trading days per cycle`)}
             </div>
             <span className="payout-main">{payoutStats.daysHit} / {PAYOUT_MIN_DAYS}</span>
             <div className="payout-days">
@@ -2633,16 +3086,16 @@ notify pgrst, 'reload schema';`;
             <span className="payout-sub">{T(`Zyklus seit ${lastPayoutDate ? `letztem Payout (${lastPayoutDate})` : "Funded-Start"} — ${payoutStats.effectiveQualifyingCount} Handelstag${payoutStats.effectiveQualifyingCount === 1 ? "" : "e"} bisher.`, `Cycle since ${lastPayoutDate ? `last payout (${lastPayoutDate})` : "funded start"} — ${payoutStats.effectiveQualifyingCount} trading day${payoutStats.effectiveQualifyingCount === 1 ? "" : "s"} so far.`)}</span>
           </div>
 
-          <div className="payout-card">
+          <div className="payout-card" style={PAYOUT_CONSISTENCY_PCT > 0 ? undefined : { display: "none" }}>
             <div className="payout-card-title">
               <span className={`payout-status-dot ${payoutStats.consistencyPassed ? "ok" : "fail"}`} />
-              50% Consistency Rule
+              {PAYOUT_CONSISTENCY_PCT}% Consistency Rule
             </div>
             <span className="payout-main">{payoutStats.consistencyPct.toFixed(1)}%</span>
             <span className="payout-sub">
               {payoutStats.consistencyPassed
-                ? T("Bester Tag bleibt unter 50% des Zyklus-Gewinns.", "Best day stays under 50% of the cycle profit.")
-                : T("Achtung: ein Tag dominiert über 50% des Zyklus-Gewinns.", "Warning: one day makes up more than 50% of the cycle profit.")}
+                ? T(`Bester Tag bleibt unter ${PAYOUT_CONSISTENCY_PCT}% des Zyklus-Gewinns.`, `Best day stays under ${PAYOUT_CONSISTENCY_PCT}% of the cycle profit.`)
+                : T(`Achtung: ein Tag dominiert über ${PAYOUT_CONSISTENCY_PCT}% des Zyklus-Gewinns.`, `Warning: one day makes up more than ${PAYOUT_CONSISTENCY_PCT}% of the cycle profit.`)}
               {" "}{T("Größter Tag:", "Biggest day:")} {fmtMoneyShort(payoutStats.biggestDay)}
             </span>
           </div>
@@ -2650,7 +3103,7 @@ notify pgrst, 'reload schema';`;
           <div className="payout-card">
             <div className="payout-card-title">
               <span className="payout-status-dot ok" />
-              {T("Drawdown (Payout-Cap 51.600)", "Drawdown (payout cap 51,600)")}
+              {T(`Drawdown (Payout-Cap ${PAYOUT_DD_PEAK_CAP.toLocaleString(LOCALE)})`, `Drawdown (payout cap ${PAYOUT_DD_PEAK_CAP.toLocaleString(LOCALE)})`)}
             </div>
             <span className="payout-main">{fmtMoneyShort(-Math.max(0, payoutStats.eodPeak - accountStats.balance))}</span>
             <div className="risk-track">
@@ -2662,11 +3115,11 @@ notify pgrst, 'reload schema';`;
           <div className="payout-card">
             <div className="payout-card-title">
               <span className={`payout-status-dot ${payoutStats.profitPassed ? "ok" : ""}`} />
-              {lastPayoutDate ? T("Profit seit letztem Payout", "Profit since last payout") : T("Profit über Buffer (1.600$)", "Profit above buffer ($1,600)")}
+              {lastPayoutDate ? T("Profit seit letztem Payout", "Profit since last payout") : PAYOUT_BUFFER > 0 ? T(`Profit über Buffer (${usd0(PAYOUT_BUFFER)})`, `Profit above buffer (${usd0(PAYOUT_BUFFER)})`) : T("Profit seit Funded-Start", "Profit since funded start")}
             </div>
             <span className="payout-main">{fmtMoneyShort(payoutStats.profitAboveBuffer)}</span>
             <span className="payout-sub">
-              {T("Min. $500 nötig · auszahlbar:", "Min. $500 required · payable:")} {payoutStats.profitPassed ? fmtMoney(payoutStats.payoutAmount) : "—"} {T("(max. $2.000, 80/20)", "(max. $2,000, 80/20)")}
+              {T(`Min. ${usd0(PAYOUT_MIN_NET_PROFIT)} nötig · auszahlbar:`, `Min. ${usd0(PAYOUT_MIN_NET_PROFIT)} required · payable:`)} {payoutStats.profitPassed ? fmtMoney(payoutStats.payoutAmount) : "—"} {`(${currentPayoutCapText()}, ${splitText(PAYOUT_SPLIT)})`}
             </span>
           </div>
 
@@ -2828,9 +3281,6 @@ notify pgrst, 'reload schema';`;
             ))}
           </div>
         )}
-        <span style={{ fontSize: "11px", color: "var(--muted-light)", marginTop: "6px", display: "block" }}>
-          {T("Basiert auf der kompletten Trade-Historie (nicht vom Filter oben betroffen), sortiert nach Winrate.", "Based on the full trade history (not affected by the filter above), sorted by win rate.")}
-        </span>
       </section>
 
       <section className="insights-card">
@@ -2939,7 +3389,7 @@ notify pgrst, 'reload schema';`;
                 return (
                   <button
                     key={ci}
-                    className={`cal-cell ${hasTrades ? (displayPnl >= 0 ? "cal-win" : "cal-loss") : ""} ${isToday ? "cal-today" : ""} ${cell.isHistoric ? "cal-cell-historic" : ""} ${ci >= 5 ? "cal-cell-weekend" : ""}`}
+                    className={`cal-cell ${hasTrades ? (displayPnl >= 0 ? "cal-win" : "cal-loss") : ""} ${isToday ? "cal-today" : ""} ${cell.isHistoric ? "cal-cell-historic" : ""} ${cell.isOther ? "cal-cell-other" : ""} ${ci >= 5 ? "cal-cell-weekend" : ""}`}
                     onClick={() => hasTrades && setDayDetail(cell.iso)}
                     disabled={!hasTrades}
                   >
@@ -2949,6 +3399,7 @@ notify pgrst, 'reload schema';`;
                         <span className="cal-pnl">{fmtMoneyShort(displayPnl)}</span>
                         <span className="cal-count">{cell.trades.length} Trade{cell.trades.length > 1 ? "s" : ""}</span>
                         {cell.isHistoric && <span className="cal-historic-badge">Eval</span>}
+                        {cell.isOther && !cell.isHistoric && <span className="cal-historic-badge" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{cell.otherName}</span>}
                       </React.Fragment>
                     )}
                   </button>
@@ -2988,6 +3439,17 @@ notify pgrst, 'reload schema';`;
           isEdit
           existingSetups={existingSetups}
           existingConfluences={confluenceOptions}
+        />
+      )}
+
+      {accountPanel && (
+        <AccountPanel
+          mode={accountPanel}
+          currentName={activeAccount.name}
+          defaultName={`${T("Account", "Account")} ${accounts.length + 1}`}
+          busy={accountBusy}
+          onClose={() => !accountBusy && setAccountPanel(null)}
+          onConfirm={(vals) => createAccount({ ...vals, archiveCurrent: accountPanel === "reset" })}
         />
       )}
 
@@ -3245,7 +3707,7 @@ function ChanceTab({ list, accountStats, fundedStage, payoutCount }) {
         : STARTING_BALANCE + PAYOUT_BUFFER + PAYOUT_MIN_NET_PROFIT,
       ddBuffer: DD_BUFFER,
       peakCap: DD_PEAK_CAP,
-      staticMll: payoutCount > 0 ? MLL_AFTER_FIRST_PAYOUT : null,
+      staticMll: payoutCount > 0 && PAYOUT_STATIC_AFTER ? MLL_AFTER_FIRST_PAYOUT : null,
     };
   }, [fundedStage, payoutCount, accountStats.balance]);
 
@@ -3460,6 +3922,82 @@ function AnalysisPanel({ statsList, fullList, accountStats, fundedStage, payoutC
   );
 }
 
+// Dialog fuer "Account hinzufuegen" und "Account Reset" (mode = "add" | "reset").
+function AccountPanel({ mode, currentName, defaultName, busy, onClose, onConfirm }) {
+  const isReset = mode === "reset";
+  const [name, setName] = useState(defaultName);
+  const [type, setType] = useState("eval");
+  // Plan-Auswahl: alle 50K-Varianten von MFFU, FundedNext und Lucid.
+  const presetOptions = useMemo(() => {
+    const out = [];
+    PRESET_FIRMS.forEach((firm) => firm.plans.forEach((plan) => {
+      const s = plan.sizes.find((x) => x.size === 50000);
+      if (s) out.push({ key: `${firm.id}|${plan.id}`, firm, plan, size: s.size, rules: s.rules });
+    }));
+    return out;
+  }, []);
+  const [presetKey, setPresetKey] = useState(`${DEFAULT_PRESET.firm}|${DEFAULT_PRESET.plan}`);
+  const [nameTouched, setNameTouched] = useState(false);
+  const sel = presetOptions.find((o) => o.key === presetKey) || presetOptions[0];
+  const pickPreset = (o) => {
+    setPresetKey(o.key);
+    if (!nameTouched) setName(presetLabel(o.firm, o.plan, o.size));
+  };
+  const canSubmit = name.trim().length > 0 && !busy;
+  const submit = (e) => {
+    e.preventDefault();
+    if (canSubmit) onConfirm({ name: name.trim(), type, preset: { firm: sel.firm.id, plan: sel.plan.id, size: sel.size }, rules: sel.rules });
+  };
+  return (
+    <div className="overlay" onClick={onClose}>
+      <form className="panel" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="panel-head">
+          <span>{isReset ? T("Account Reset", "Account reset") : T("Account hinzufügen", "Add account")}</span>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label={T("Schließen", "Close")}>
+            <Icon.Close />
+          </button>
+        </div>
+        <div className="field">
+          <label>{T("Name", "Name")}</label>
+          <input type="text" value={name} onChange={(e) => { setName(e.target.value); setNameTouched(true); }} autoFocus />
+        </div>
+        <div className="field">
+          <label>{T("Prop Firm · Plan (50K)", "Prop firm · plan (50K)")}</label>
+          {PRESET_FIRMS.map((firm) => (
+            <div key={firm.id} style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <span style={{ fontSize: "11px", color: "var(--muted-light)", marginTop: "4px" }}>{firm.full}</span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {presetOptions.filter((o) => o.firm.id === firm.id).map((o) => (
+                  <button key={o.key} type="button" style={{ flex: "1 1 auto" }} className={`dir-btn res-win ${presetKey === o.key ? "active" : ""}`} onClick={() => pickPreset(o)}>
+                    {o.plan.name} · {sizeK(o.size)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {sel && (
+            <div className="notice" style={{ marginTop: "6px" }}>
+              <b>{presetLabel(sel.firm, sel.plan, sel.size)}</b>
+              <div style={{ marginTop: "4px" }}>{sel.plan.note}</div>
+              {rulesLines(sel.rules).map((l, i) => <div key={i} style={{ marginTop: "2px" }}>{l}</div>)}
+            </div>
+          )}
+        </div>
+        <div className="field">
+          <label>{isReset ? T("Typ des neuen Accounts", "Type of the new account") : T("Typ", "Type")}</label>
+          <div className="dir-toggle">
+            <button type="button" className={`dir-btn res-win ${type === "eval" ? "active" : ""}`} onClick={() => setType("eval")}>Eval</button>
+            <button type="button" className={`dir-btn res-win ${type === "xfa" ? "active" : ""}`} onClick={() => setType("xfa")}>XFA</button>
+          </div>
+        </div>
+        <button type="submit" className="btn-primary btn-block" disabled={!canSubmit}>
+          {busy ? T("Wird angelegt…", "Creating…") : isReset ? T("Reset durchführen", "Reset account") : T("Account anlegen", "Create account")}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function StatCard({ label, value }) {
   return (
     <div className="stat-card">
@@ -3481,12 +4019,12 @@ function PayoutLog({ payouts, onAdd, onDelete }) {
   return (
     <div className="payout-card" style={{ gridColumn: "1 / -1" }}>
       <div className="payout-card-title">
-        <span className={`payout-status-dot ${payouts.length >= PAYOUT_MAX_SIM ? "ok" : ""}`} />
-        {T("Payout-Log", "Payout log")} · {payouts.length} / {PAYOUT_MAX_SIM} {T("Sim-Payouts", "sim payouts")}
+        <span className={`payout-status-dot ${PAYOUT_MAX_SIM > 0 && payouts.length >= PAYOUT_MAX_SIM ? "ok" : ""}`} />
+        {T("Payout-Log", "Payout log")} · {payouts.length}{PAYOUT_MAX_SIM > 0 ? ` / ${PAYOUT_MAX_SIM}` : ""} {T("Sim-Payouts", "sim payouts")}
       </div>
       <span className="payout-sub">
-        {T("Summe", "Total")}: <b style={{ color: "#fff" }}>{fmtMoney(total)}</b> · {T("dein Anteil (80%)", "your share (80%)")}: <b style={{ color: "#fff" }}>{fmtMoney(total * PAYOUT_SPLIT)}</b>
-        {payouts.length >= PAYOUT_MAX_SIM ? ` · ${T("Live-Promotion möglich", "eligible for live promotion")}` : ""}
+        {T("Summe", "Total")}: <b style={{ color: "#fff" }}>{fmtMoney(total)}</b> · {T(`dein Anteil (${Math.round(PAYOUT_SPLIT * 100)}%)`, `your share (${Math.round(PAYOUT_SPLIT * 100)}%)`)}: <b style={{ color: "#fff" }}>{fmtMoney(total * PAYOUT_SPLIT)}</b>
+        {PAYOUT_MAX_SIM > 0 && payouts.length >= PAYOUT_MAX_SIM ? ` · ${T("Live-Promotion möglich", "eligible for live promotion")}` : ""}
         {payouts.length > 0 ? ` · ${T(`MLL seit dem 1. Payout statisch bei ${fmtMoney(MLL_AFTER_FIRST_PAYOUT)}`, `MLL static at ${fmtMoney(MLL_AFTER_FIRST_PAYOUT)} since the 1st payout`)}` : ""}
       </span>
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
@@ -3495,7 +4033,6 @@ function PayoutLog({ payouts, onAdd, onDelete }) {
         <button type="button" className="payout-banner-clear" disabled={!canAdd} onClick={() => { onAdd(date, Number(amount)); setAmount(""); }}>
           {T("+ Payout eintragen", "+ Add payout")}
         </button>
-        <span className="payout-sub">{T("Brutto = vom Konto abgebuchter Betrag. Verringert die Balance oben.", "Gross = amount withdrawn from the account. Reduces the balance above.")}</span>
       </div>
       {rows.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginTop: "4px" }}>
@@ -3923,7 +4460,7 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
             </div>
 
             <div className="field">
-              <label>{T("Finaler PnL (optional — inkl. Fees/Spread)", "Final PnL (optional — incl. fees/spread)")}</label>
+              <label>{T("Finaler PnL (optional)", "Final PnL (optional)")}</label>
               <input
                 type="number"
                 step="any"
@@ -3998,7 +4535,6 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
                   {T("Ohne Plan", "Without plan")}
                 </button>
               </div>
-              <span style={{ fontSize: "11px", color: "var(--muted-light)" }}>{T("Standard: Mit Plan. Bei einem Regelbruch auf „Ohne Plan“ umstellen.", "Default: with plan. Switch to “Without plan” if you broke your rules.")}</span>
             </div>
 
             <div className="field">
@@ -4054,11 +4590,6 @@ function DayDetailModal({ day, onClose, onDelete, onEdit }) {
             <Icon.Close />
           </button>
         </div>
-        {day.isHistoric && (
-          <div style={{ fontSize: "11px", color: "var(--muted)", background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "4px", padding: "8px 12px", lineHeight: "1.5" }}>
-            {T("Eval-Tag — Trades sind sichtbar, zaehlen aber nicht mehr zur Funded-Stage-Balance.", "Eval day — trades are visible but no longer count towards the funded stage balance.")}
-          </div>
-        )}
         <div className="daydetail-summary">
           <span className={day.pnl >= 0 ? "pos" : "neg"} style={day.isHistoric ? { opacity: 0.5, textDecoration: "line-through" } : {}}>
             {fmtMoney(day.pnl)}
@@ -4223,10 +4754,6 @@ function ForwardTestPanel({ onClose, trades, existingConfluences, realizedRRForT
           <button type="button" className="icon-btn" onClick={onClose} aria-label={T("Schließen", "Close")}>
             <Icon.Close />
           </button>
-        </div>
-
-        <div className="notice">
-          {T("Wähle die Confluences, die dein geplanter Trade erfüllt. Das System berechnet aus deiner Trade-Historie, wie sich Setups mit den gleichen (oder teilweise gleichen) Confluences bisher geschlagen haben.", "Select the confluences your planned trade meets. The system calculates from your trade history how setups with the same (or partly the same) confluences have performed so far.")}
         </div>
 
         <div>
