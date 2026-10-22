@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="sharingan.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" />
 <title>Trading Journal</title>
 <link rel="icon" type="image/x-icon" href="sharingan.png">
 <style>
@@ -113,7 +113,7 @@
   .cal-week { display: grid; grid-template-columns: repeat(var(--cols, 7), 1fr) 130px; gap: 6px; margin-bottom: 6px; }
   .cal-cell {
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
-    min-height: 80px; padding: 9px 10px; display: flex; flex-direction: column; gap: 3px;
+    min-height: 88px; padding: 9px 10px; display: flex; flex-direction: column; gap: 3px;
     text-align: left; cursor: default; font-family: inherit; color: var(--text);
   }
   .cal-cell-empty { background: transparent; border: none; }
@@ -141,7 +141,7 @@
 
   .cal-loading { padding: 30px 0; text-align: center; color: var(--muted); font-size: 12px; letter-spacing: 0.08em; }
 
-  /* ── Filter Bar ── */
+  /*  Filter Bar  */
   .filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .filter-group { display: flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 4px; }
   .filter-chip {
@@ -189,7 +189,41 @@
   @media (max-width: 720px) { .insights-cols { grid-template-columns: 1fr; } }
   .insights-col-title { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; }
 
-  /* ── Toast ── */
+  /*  Tages-Briefing  */
+  .brief-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 18px 22px; display: flex; flex-direction: column; gap: 12px; }
+  .brief-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .brief-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; }
+  .brief-day { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; color: var(--text); }
+  .brief-list { display: flex; flex-direction: column; gap: 8px; }
+  .brief-item { padding: 10px 14px; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--muted); border-radius: 4px; display: flex; flex-direction: column; gap: 4px; }
+  .brief-item.warn { border-left-color: var(--red); }
+  .brief-item.good { border-left-color: var(--text); }
+  .brief-short { font-size: 13.5px; line-height: 1.45; color: var(--text); }
+  .brief-detail { font-size: 11.5px; line-height: 1.45; color: var(--muted-light); }
+  .brief-toggle { align-self: flex-start; background: none; border: 1px solid var(--line); color: var(--muted-light); font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 7px 12px; border-radius: 4px; cursor: pointer; transition: all .12s ease; }
+  .brief-toggle:hover { color: var(--text); border-color: var(--muted-light); }
+  .brief-foot { font-size: 11px; color: var(--muted); }
+
+  /*  Tagesnotizen  */
+  .notes-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .notes-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .notes-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; }
+  .notes-date { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 13px; outline: none; color-scheme: dark; }
+  .notes-date:focus { border-color: var(--red); }
+  .notes-meta { font-size: 11.5px; color: var(--muted-light); font-family: 'JetBrains Mono', monospace; }
+  .notes-pnl.pos { color: var(--text); }
+  .notes-pnl.neg { color: var(--red); }
+  .notes-area { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; color: var(--text); font-size: 14px; font-family: 'JetBrains Mono', monospace; outline: none; resize: vertical; min-height: 96px; line-height: 1.5; width: 100%; transition: border-color .15s ease; }
+  .notes-area:focus { border-color: var(--red); }
+  .notes-foot { font-size: 11px; color: var(--muted); }
+  .notes-list { display: flex; flex-direction: column; gap: 8px; }
+  .notes-item { text-align: left; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 10px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; font-family: inherit; color: inherit; transition: border-color .12s ease; }
+  .notes-item:hover { border-color: var(--muted-light); }
+  .notes-item.active { border-left: 3px solid var(--red); }
+  .notes-item-head { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: var(--muted-light); font-family: 'JetBrains Mono', monospace; }
+  .notes-item-text { font-size: 13px; line-height: 1.45; color: var(--text); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /*  Toast  */
   .toast-stack { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 10px; z-index: 100; }
   .toast {
     background: var(--panel); border: 1px solid var(--line); border-left: 2px solid var(--text);
@@ -199,7 +233,7 @@
   .toast.toast-error { border-left-color: var(--red); color: #ff6b78; }
   @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
-  /* ── Edit mode tweaks ── */
+  /*  Edit mode tweaks  */
   .panel-head-actions { display: flex; align-items: center; gap: 14px; }
   .edit-trade-btn {
     background: transparent; border: 1px solid var(--line); color: var(--muted-light); border-radius: 4px;
@@ -209,11 +243,11 @@
   .edit-trade-btn:hover { border-color: var(--muted-light); color: var(--text); }
   .trade-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
-  /* ── kbd hint ── */
+  /*  kbd hint  */
   .kbd-hint { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px; margin-left: 8px; font-family: 'JetBrains Mono', monospace; }
   .btn-primary .kbd-hint { color: rgba(255,255,255,0.6); border-color: rgba(255,255,255,0.3); }
 
-  /* ── Risk Bars (Drawdown / Target) ── */
+  /*  Risk Bars (Drawdown / Target)  */
   .risk-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 720px) { .risk-row { grid-template-columns: 1fr; } }
   .risk-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
@@ -231,7 +265,7 @@
   .risk-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted-light); }
   .risk-marker { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); }
 
-  /* ── Eval toggle button ── */
+  /*  Eval toggle button  */
   .btn-secondary {
     display: flex; align-items: center; gap: 8px;
     background: transparent; color: var(--muted-light);
@@ -244,7 +278,7 @@
   .btn-secondary.active { background: rgba(46,204,113,0.12); border-color: #2ecc71; color: #2ecc71; }
   .topbar-actions { display: flex; align-items: center; gap: 10px; }
 
-  /* ── Payout mode ── */
+  /*  Payout mode  */
   .payout-banner {
     background: rgba(46,204,113,0.07); border: 1px solid rgba(46,204,113,0.3); border-left: 2px solid #2ecc71;
     border-radius: 4px; padding: 12px 18px; font-size: 12.5px; color: #6fdb9a; line-height: 1.6;
@@ -591,6 +625,287 @@
     .acct-bar .filter-group { flex-wrap: wrap; }
     .acct-bar .btn-secondary, .acct-bar .filter-chip { min-height: 40px; }
   }
+
+  /* ═══════════════ MODERN REFRESH (Override-Layer) ═══════════════
+     Ueberschreibt nur Optik (Farben, Radien, Schrift, Schatten) — keine Logik, kein Layout.
+     Zum Zuruecksetzen alles bis "END MODERN REFRESH" loeschen. */
+  :root {
+    --bg: #000000;
+    --panel: #08080a;
+    --panel-2: #0c0c0f;
+    --line: rgba(255,255,255,0.06);
+    --muted: #62626c;
+    --muted-light: #8e8e98;
+    --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    --r-lg: 16px;
+    --r-md: 12px;
+    --r-sm: 9px;
+    --shadow-card: 0 1px 0 rgba(255,255,255,0.045) inset, 0 10px 30px rgba(0,0,0,0.35);
+  }
+  html { background: var(--bg); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
+  html, body { font-family: var(--font-ui); }
+  body { background: var(--bg); }
+  /* Logo: verschmilzt mit dem Hintergrund (Schwarz wird durch screen unsichtbar, Raender laufen weich aus) */
+  img[alt="Logo"] {
+    object-fit: contain; border-radius: 0 !important; mix-blend-mode: screen;
+    -webkit-mask-image: radial-gradient(closest-side, #000 62%, transparent 100%);
+    mask-image: radial-gradient(closest-side, #000 62%, transparent 100%);
+  }
+  ::selection { background: rgba(224,0,26,0.5); color: #fff; }
+  * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent; }
+  button:focus-visible, .cal-cell:focus-visible, a:focus-visible { outline: 2px solid rgba(255,255,255,0.55); outline-offset: 2px; }
+
+  /* Topbar */
+  .topbar { border-bottom-color: var(--line); }
+  .brand-mark { box-shadow: 0 0 12px rgba(224,0,26,0.55); }
+  .brand-name { font-family: var(--font-ui); font-weight: 600; letter-spacing: 0.18em; }
+
+  /* Karten */
+  .hero, .stat-card, .cal-card, .insights-card, .brief-card, .notes-card, .risk-card, .payout-card {
+    border-radius: var(--r-lg);
+    background: linear-gradient(180deg, rgba(255,255,255,0.028), rgba(255,255,255,0) 55%), var(--panel);
+    box-shadow: var(--shadow-card);
+  }
+  .payout-banner, .funded-banner, .notice { border-radius: var(--r-md); }
+  .insight-item, .trade-row, .computed-box, .computed-item { border-radius: var(--r-md); }
+  .brief-item { border-radius: 10px; }
+  .upload-box { border-radius: var(--r-md); }
+  .notes-item { border-radius: var(--r-md); }
+
+  /* Beschriftungen: ruhiger, weniger Spacing */
+  .hero-label, .stat-label, .insights-title, .insight-label, .brief-title, .notes-title,
+  .cal-dow, .payout-card-title, .computed-label, .confluence-group-label, .insights-col-title,
+  .risk-label, .field label {
+    font-family: var(--font-ui); font-weight: 500; letter-spacing: 0.07em;
+  }
+
+  /* Zahlen: sauber, tabellarisch, serifenlos */
+  .hero-value, .stat-value, .insight-value, .risk-value, .cal-pnl, .cal-weekpnl, .trade-pnl,
+  .hero-delta, .cal-month-pnl, .payout-main, .computed-value, .breakdown-value, .cal-daynum, .cal-weeknum {
+    font-family: var(--font-ui); font-variant-numeric: tabular-nums;
+  }
+  .hero-value { font-weight: 600; letter-spacing: -0.035em; }
+  .stat-value { font-weight: 600; letter-spacing: -0.02em; }
+
+  /* Buttons */
+  .btn-primary, .btn-secondary, .filter-chip, .dir-btn, .trade-shot-btn, .confluence-chip,
+  .confluence-add-btn, .edit-trade-btn, .brief-toggle, .confirm-btn {
+    font-family: var(--font-ui);
+  }
+  .btn-primary, .btn-secondary { text-transform: none; letter-spacing: 0; font-weight: 600; border-radius: var(--r-md); }
+  .btn-primary {
+    background: linear-gradient(180deg, #ee1a33, #cf0019);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.2) inset, 0 6px 18px rgba(224,0,26,0.22);
+  }
+  .btn-primary:hover { opacity: 1; filter: brightness(1.08); }
+  .btn-secondary { background: rgba(255,255,255,0.03); color: var(--text); }
+  .btn-secondary:hover { background: rgba(255,255,255,0.07); }
+  .btn-secondary.active { background: rgba(46,204,113,0.12); }
+  .cal-navbtn { border-radius: 10px; background: rgba(255,255,255,0.03); }
+  .cal-navbtn:hover { background: rgba(255,255,255,0.07); }
+
+  /* Filter / Segmente */
+  .filter-group { border-radius: var(--r-md); background: rgba(255,255,255,0.03); }
+  .filter-chip { border-radius: var(--r-sm); text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 12.5px; }
+  .filter-chip.active { background: rgba(255,255,255,0.1); }
+
+  /* Kalender */
+  .cal-cell { border-radius: 10px; background: rgba(255,255,255,0.025); }
+  .cal-cell:not(.cal-cell-empty):not(:disabled):hover { transform: translateY(-1px); transition: border-color .12s ease, transform .12s ease; }
+  .cal-win { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.16); }
+  .cal-loss { background: rgba(224,0,26,0.08); border-color: rgba(224,0,26,0.35); }
+  .cal-today { box-shadow: 0 0 0 1.5px var(--red) inset; }
+  .cal-weeksum { border-radius: 10px; }
+
+  /* Formulare */
+  .field input, .field textarea, .notes-date, .notes-area, .confluence-add-row input {
+    border-radius: 10px; background: rgba(255,255,255,0.03);
+    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+  }
+  .field input, .confluence-add-row input { font-family: var(--font-ui); }
+  .field textarea, .notes-area { font-family: var(--font-ui); line-height: 1.6; }
+  .field input:focus, .field textarea:focus, .notes-date:focus, .notes-area:focus, .confluence-add-row input:focus {
+    border-color: rgba(224,0,26,0.7); box-shadow: 0 0 0 3px rgba(224,0,26,0.16); background: rgba(255,255,255,0.045);
+  }
+  .dir-btn, .symbol-btn { border-radius: 10px; background: rgba(255,255,255,0.025); }
+  .dir-btn { letter-spacing: 0.04em; font-weight: 600; }
+  .confluence-chip { background: rgba(255,255,255,0.025); border-radius: 999px; font-weight: 600; }
+  .dir-tag { border-radius: 6px; }
+
+  /* Fortschrittsbalken */
+  .risk-track, .breakdown-bar-track { border-radius: 999px; }
+  .risk-fill, .breakdown-bar-fill { border-radius: 999px; }
+
+  /* Overlays, Panels, Toasts */
+  .overlay { background: rgba(0,0,0,0.68); backdrop-filter: blur(10px) saturate(115%); -webkit-backdrop-filter: blur(10px) saturate(115%); }
+  .panel {
+    border-radius: 20px; border-color: rgba(255,255,255,0.1);
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0) 40%), var(--panel);
+    box-shadow: 0 30px 80px rgba(0,0,0,0.65), 0 1px 0 rgba(255,255,255,0.05) inset;
+    animation: panel-in .18s ease-out;
+  }
+  @keyframes panel-in { from { opacity: 0; transform: translateY(8px) scale(0.985); } to { opacity: 1; transform: none; } }
+  .panel-head { font-family: var(--font-ui); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; text-transform: none; color: var(--text); }
+  .icon-btn { border-radius: 8px; }
+  .icon-btn:hover { background: rgba(255,255,255,0.07); }
+  .toast { border-radius: var(--r-md); border-color: rgba(255,255,255,0.1); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  /* ═══════════════ END MODERN REFRESH ═══════════════ */
+
+  /* ═══════════════ MODERN REFRESH 2 (noch klarer, ruhiger, Pill-basiert) ═══════════════
+     Zum Zuruecksetzen alles bis "END MODERN REFRESH 2" loeschen. */
+  :root { --r-lg: 20px; --r-md: 14px; --r-sm: 10px; --hairline: rgba(255,255,255,0.055); }
+  html { letter-spacing: -0.006em; scroll-behavior: smooth; }
+
+  /* Flaechen: flacher, ruhiger, mit feiner Kante */
+  .hero, .stat-card, .cal-card, .insights-card, .brief-card, .notes-card, .risk-card, .payout-card {
+    border-color: var(--hairline);
+    background: linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0.003)), #060607;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 24px 50px -28px rgba(0,0,0,0.9);
+  }
+  .stat-card { transition: border-color .15s ease; }
+  .stat-card:hover { border-color: rgba(255,255,255,0.15); }
+
+  /* Beschriftungen: Satzschreibung statt Grossbuchstaben */
+  .hero-label, .stat-label, .insights-title, .insight-label, .brief-title, .notes-title,
+  .payout-card-title, .computed-label, .confluence-group-label, .insights-col-title,
+  .risk-label, .field label {
+    text-transform: none; letter-spacing: 0; font-size: 12.5px; font-weight: 500; color: var(--muted-light);
+  }
+  .cal-dow { text-transform: none; letter-spacing: 0.02em; font-weight: 500; }
+  .an-table th { text-transform: none; letter-spacing: 0; font-weight: 500; }
+
+  /* Hero */
+  @media (min-width: 721px) { .hero-value { font-size: 52px; } }
+  .hero-value { font-weight: 600; letter-spacing: -0.04em; }
+  .hero-delta { padding: 4px 11px; border-radius: 999px; background: rgba(255,255,255,0.07); }
+  .hero-delta.neg { background: rgba(224,0,26,0.15); }
+
+  /* Buttons & Segmente als Pills */
+  .btn-primary, .btn-secondary { border-radius: 999px; }
+  .btn-secondary:active { transform: scale(0.98); }
+  .cal-navbtn { border-radius: 999px; }
+  .filter-group { border-radius: 999px; }
+  .filter-chip { border-radius: 999px; padding: 7px 14px; }
+  .filter-chip.active:not(.win-chip):not(.loss-chip):not(.be-chip) { background: #f4f4f5; color: #09090b; }
+  .confluence-chip, .dir-tag { border-radius: 999px; }
+
+  /* Kalender: leichter */
+  .cal-cell { border-radius: 12px; background: transparent; border-color: rgba(255,255,255,0.06); }
+  .cal-cell.cal-cell-empty { background: transparent; border: none; }
+  .cal-win { background: rgba(255,255,255,0.055); border-color: rgba(255,255,255,0.14); }
+  .cal-loss { background: rgba(224,0,26,0.09); border-color: rgba(224,0,26,0.32); }
+  .cal-weeksum { border-radius: 12px; border-style: solid; border-color: transparent; background: rgba(255,255,255,0.025); }
+  .cal-title { font-weight: 600; }
+
+  /* Listen & Tabellen */
+  .trade-row { background: rgba(255,255,255,0.02); transition: background .15s ease; }
+  .trade-row:hover { background: rgba(255,255,255,0.045); }
+  .an-table tr:hover td { background: rgba(255,255,255,0.03); }
+
+  /* Formulare */
+  .field input, .field textarea, .notes-date, .notes-area, .confluence-add-row input { border-radius: 12px; }
+  .dir-btn, .symbol-btn { border-radius: 12px; }
+
+  /* Dialoge: Glas */
+  .panel {
+    border-radius: 24px; background: rgba(12,12,15,0.86);
+    backdrop-filter: blur(28px) saturate(140%); -webkit-backdrop-filter: blur(28px) saturate(140%);
+  }
+  .toast { border-radius: 14px; }
+
+  /* Sanftes Einblenden beim Laden (Kopfleiste mit Logo bleibt unberuehrt) */
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .journal-shell > :not(.topbar):not(.overlay):not(.toast-stack) { animation: rise .55s cubic-bezier(.2,.7,.2,1) backwards; }
+  .journal-shell > :nth-child(2) { animation-delay: .02s; }
+  .journal-shell > :nth-child(3) { animation-delay: .06s; }
+  .journal-shell > :nth-child(4) { animation-delay: .10s; }
+  .journal-shell > :nth-child(5) { animation-delay: .14s; }
+  .journal-shell > :nth-child(6) { animation-delay: .18s; }
+  .journal-shell > :nth-child(n+7) { animation-delay: .22s; }
+  /* ═══════════════ END MODERN REFRESH 2 ═══════════════ */
+
+  /* ═══════════════ MODERN REFRESH 3 (Chart-Feinschliff, Buttons) ═══════════════
+     Zum Zuruecksetzen alles bis "END MODERN REFRESH 3" loeschen. */
+  html { font-feature-settings: "cv11", "ss03"; }
+  /* Buttons ganz oben (Kopfleiste): Grossbuchstaben */
+  .topbar-actions .btn-primary, .topbar-actions .btn-secondary { text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* Buttons: weich gefuellt statt umrandet */
+  .btn-secondary { border-color: transparent; background: rgba(255,255,255,0.06); }
+  .btn-secondary:hover { border-color: transparent; background: rgba(255,255,255,0.11); }
+  .btn-secondary.active:hover { background: rgba(46,204,113,0.18); border-color: #2ecc71; }
+
+  /* Equity-Chart: feste Linienstaerke trotz Streckung, dezenter Glow */
+  .equity-svg path[fill="none"] { vector-effect: non-scaling-stroke; stroke-width: 2px; filter: drop-shadow(0 0 7px rgba(255,255,255,0.3)); }
+  .equity-svg path[stroke="var(--red)"] { filter: drop-shadow(0 0 7px rgba(224,0,26,0.5)); }
+
+  /* Balken mit Verlauf */
+  .risk-fill.dd { background: linear-gradient(90deg, #7d0010, var(--red)); }
+  .risk-fill.target { background: linear-gradient(90deg, rgba(255,255,255,0.55), #fff); }
+
+  /* Tabellen & Heatmap */
+  .an-table td { font-family: var(--font-ui); font-size: 13px; }
+  .heat-cell { border-radius: 4px; }
+  /* ═══════════════ END MODERN REFRESH 3 ═══════════════ */
+
+  /* ═══════════════ MODERN REFRESH 4 (mehr Gruen fuer Gewinntage) ═══════════════
+     Zum Zuruecksetzen alles bis "END MODERN REFRESH 4" loeschen. */
+  .cal-win {
+    background: linear-gradient(180deg, rgba(46,204,113,0.17), rgba(46,204,113,0.07));
+    border-color: rgba(46,204,113,0.42);
+  }
+  .cal-win .cal-pnl { color: #2ecc71; }
+  .cal-win .cal-daynum { color: rgba(46,204,113,0.75); }
+  .cal-weekpnl.pos, .cal-month-pnl.pos { color: #2ecc71; }
+  .cal-weeksum:has(.cal-weekpnl.pos) { background: rgba(46,204,113,0.07); }
+  /* ═══════════════ END MODERN REFRESH 4 ═══════════════ */
+
+  /* ═══════════════ MODERN REFRESH 5 (neue Win-Farbe, KW-Fix, Feinschliff) ═══════════════
+     Win-Farbe zentral aendern: --win / --win-rgb. Zum Zuruecksetzen alles bis "END MODERN REFRESH 5" loeschen. */
+  :root { --win: #2dd4bf; --win-rgb: 45,212,191; --loss-rgb: 224,0,26; }
+
+  /* Gewinntage */
+  .cal-win {
+    background: linear-gradient(160deg, rgba(var(--win-rgb),0.20), rgba(var(--win-rgb),0.05) 70%);
+    border-color: rgba(var(--win-rgb),0.38);
+    box-shadow: 0 0 0 1px rgba(var(--win-rgb),0.05) inset, 0 6px 18px rgba(var(--win-rgb),0.07);
+  }
+  .cal-win .cal-pnl { color: var(--win); }
+  .cal-win .cal-daynum { color: rgba(var(--win-rgb),0.8); }
+  .cal-win:not(.cal-cell-empty):not(:disabled):hover { border-color: rgba(var(--win-rgb),0.7); box-shadow: 0 8px 22px rgba(var(--win-rgb),0.16); }
+
+  /* Verlusttage */
+  .cal-loss {
+    background: linear-gradient(160deg, rgba(var(--loss-rgb),0.16), rgba(var(--loss-rgb),0.04) 70%);
+    border-color: rgba(var(--loss-rgb),0.34);
+  }
+  .cal-loss:not(.cal-cell-empty):not(:disabled):hover { border-color: rgba(var(--loss-rgb),0.65); box-shadow: 0 8px 22px rgba(var(--loss-rgb),0.14); }
+
+  /* Heute */
+  .cal-today { box-shadow: 0 0 0 1.5px rgba(255,255,255,0.85) inset; }
+  .cal-today .cal-daynum { color: #fff; font-weight: 700; }
+
+  /* KW-Spalte: neutral, nur bei Wochen mit Trades eingefaerbt */
+  .cal-weeksum, .cal-weeksum:has(.cal-weekpnl.pos) { background: rgba(255,255,255,0.025); border-color: transparent; }
+  .cal-weeksum:has(.cal-weekpnl.pos) { background: rgba(var(--win-rgb),0.09); border-color: rgba(var(--win-rgb),0.22); }
+  .cal-weeksum:has(.cal-weekpnl.neg) { background: rgba(var(--loss-rgb),0.09); border-color: rgba(var(--loss-rgb),0.22); }
+  .cal-weeksum-empty { background: transparent !important; border-color: rgba(255,255,255,0.05) !important; }
+  .cal-weekpnl.pos, .cal-month-pnl.pos { color: var(--win); }
+  .cal-weekpnl.none { color: var(--muted); font-weight: 500; }
+  .cal-weeksum-empty .cal-weeknum { opacity: 0.6; }
+
+  /* Feinschliff */
+  .cal-grid-header .cal-dow { letter-spacing: 0.12em; font-weight: 600; }
+  .cal-cell { transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
+  .cal-pnl { letter-spacing: -0.02em; }
+  .cal-navbtn:hover { border-color: rgba(255,255,255,0.25); }
+  .btn-secondary.active { background: rgba(var(--win-rgb),0.14); }
+  .btn-secondary.active:hover { background: rgba(var(--win-rgb),0.22); border-color: var(--win); }
+  .filter-chip.active.win-chip { background: rgba(var(--win-rgb),0.18); color: var(--win); }
+  ::selection { background: rgba(var(--win-rgb),0.3); }
+  * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent; }
+  /* ═══════════════ END MODERN REFRESH 5 ═══════════════ */
 </style>
 </head>
 <body>
@@ -698,6 +1013,8 @@ const T = (de, en) => (IS_EN ? en : de);
 const LOCALE = IS_EN ? "en-US" : "de-DE";
 try { document.documentElement.lang = IS_EN ? "en" : "de"; } catch {}
 
+const NOTES_LS_KEY = "journal_daynotes";
+
 // Funded-Stage-Einstellungen (journal_funded_*) pro Profil getrennt speichern, damit sich
 // zwei Profile im selben Browser nicht gegenseitig die Konto-Phase ueberschreiben.
 if (ACTIVE_PROFILE) {
@@ -707,6 +1024,8 @@ if (ACTIVE_PROFILE) {
     if (typeof k !== "string") return k;
     // Account-Liste und aktiver Account gelten fuers ganze Profil.
     if (k === ACCOUNTS_LS_KEY || k === ACTIVE_ACCOUNT_LS_KEY) return `${k}__${ACTIVE_PROFILE.id}`;
+    // Tagesnotizen gelten fuers ganze Profil (alle Accounts).
+    if (k === NOTES_LS_KEY) return `${k}__${ACTIVE_PROFILE.id}`;
     // Funded-Stage-Einstellungen & Payouts: pro Profil UND pro Account. Der Hauptaccount behaelt die bisherigen Schluessel.
     if (k.startsWith("journal_funded")) {
       return ACTIVE_ACCOUNT_ID === MAIN_ACCOUNT_ID ? `${k}__${ACTIVE_PROFILE.id}` : `${k}__${ACTIVE_PROFILE.id}__${ACTIVE_ACCOUNT_ID}`;
@@ -729,7 +1048,7 @@ if (ACTIVE_PROFILE) {
   // Geraets, auf dem sie gesetzt wurden (Handy startete deshalb immer in der Eval Stage). Jetzt werden
   // sie zusaetzlich in der Datenbank gespeichert und beim Start geladen. Die Datenbank gewinnt; nur wenn
   // dort noch nichts steht, wird der lokale Wert hochgeladen. Fehlt die Tabelle, bleibt alles lokal.
-  const SYNC_KEYS = ["journal_funded_stage", "journal_funded_start_date", "journal_funded_activated_at", "journal_funded_payouts", "journal_funded_last_payout", ACCOUNTS_LS_KEY];
+  const SYNC_KEYS = ["journal_funded_stage", "journal_funded_start_date", "journal_funded_activated_at", "journal_funded_payouts", "journal_funded_last_payout", ACCOUNTS_LS_KEY, NOTES_LS_KEY];
   const settingsOn = !String(ACTIVE_PROFILE.url).includes("DEIN-PROJEKT") && !String(ACTIVE_PROFILE.key).includes("DEIN-ANON-KEY");
   const SETTINGS_URL = `${String(ACTIVE_PROFILE.url).replace(/\/+$/, "")}/rest/v1/Settings`;
   const sbH = { apikey: ACTIVE_PROFILE.key, Authorization: `Bearer ${ACTIVE_PROFILE.key}`, "Content-Type": "application/json" };
@@ -856,6 +1175,8 @@ let MLL_AFTER_FIRST_PAYOUT = STARTING_BALANCE + 100; // nach dem 1. Payout wird 
 let PAYOUT_MIN_REQUEST = 0;
 let PAYOUT_PCT = 1;
 let PAYOUT_MIN_DAY_PROFIT = 0;
+let PAYOUT_CAL_DAYS = 0; // >0: Mindest-Kalendertage seit Zyklus-Start statt Handelstage (z. B. MFFU Pro: 14)
+let PAYOUT_STATIC_AFTER = true; // true: MLL wird nach dem 1. Payout statisch (Start + Offset)
 let PAYOUT_MAX_FIRST = 2000;
 const NOCAP = 1e9;
 const usd0 = (n) => "$" + Math.round(n).toLocaleString(LOCALE);
@@ -875,6 +1196,7 @@ const mkRules = (size, o) => {
     maxPayout: o.maxPayout ?? NOCAP, maxPayoutFirst: o.maxPayoutFirst ?? null,
     payoutPct: o.payoutPct ?? 1, minDays: o.minDays ?? 0, minDayProfit: o.minDayProfit ?? 0,
     consistency: o.consistency ?? 0, maxPayouts: o.maxPayouts ?? 0, split: o.split ?? 0.8,
+    calDays: o.calDays ?? 0, staticAfter: o.staticAfter ?? true,
   };
 };
 const mkSizes = (list, base) => list.map(([size, per]) => ({ size, rules: mkRules(size, { ...base, ...per }) }));
@@ -1035,6 +1357,8 @@ function applyAccountRules(rules) {
   PAYOUT_MAX_FIRST = x.maxPayoutFirst != null ? x.maxPayoutFirst : x.maxPayout;
   PAYOUT_MIN_DAYS = x.minDays;
   PAYOUT_MIN_DAY_PROFIT = x.minDayProfit;
+  PAYOUT_CAL_DAYS = x.calDays || 0;
+  PAYOUT_STATIC_AFTER = x.staticAfter !== false;
   PAYOUT_CONSISTENCY_PCT = x.consistency;
   PAYOUT_MAX_SIM = x.maxPayouts;
   PAYOUT_SPLIT = x.split;
@@ -1075,7 +1399,7 @@ const CONFLUENCE_CATEGORIES = [
   { label: "Fib Retracement", levels: ["x1", "x2", "x3", "x4"] },
   { label: "Fib Extension", levels: ["x1", "x2", "x3", "x4"] },
   { label: "Trendbasierte Fib Extension", levels: ["x1", "x2", "x3", "x4"] },
-  { label: "Zonen-Indikator", levels: ["Reversal", "HOD / LOD"] },
+  { label: "Zonen-Indikator", levels: ["Reversal", "HOD / LOD", "Nga Indi ES"] },
 ];
 const DEFAULT_CONFLUENCES = CONFLUENCE_CATEGORIES.flatMap((cat) =>
   cat.levels.map((level) => `${cat.label} ${level}`)
@@ -1896,46 +2220,8 @@ function TradingJournal() {
     return null;
   }, []);
 
-  // ── Confluence-Auswertung ──
-  // Über die GESAMTE Historie (nicht nur Funded-Stage), damit die statistische
-  // Basis für die Strategie-Validierung möglichst groß bleibt. Respektiert aber
-  // die Symbol-/Ergebnis-Filter aus der Filterleiste.
-  const confluenceStats = useMemo(() => {
-    const map = new Map();
-    filteredTrades.forEach((t) => {
-      const tags = Array.isArray(t.confluences) ? t.confluences : [];
-      tags.forEach((tag) => {
-        if (!map.has(tag)) {
-          map.set(tag, { tag, count: 0, wins: 0, losses: 0, bes: 0, rrSum: 0, rrCount: 0, ptsSum: 0, ptsCount: 0, pnlSum: 0 });
-        }
-        const e = map.get(tag);
-        e.count += 1;
-        e.pnlSum += Number(t.pnl || 0);
-        if (t.result === "win") e.wins += 1;
-        else if (t.result === "loss") e.losses += 1;
-        else if (t.result === "be") e.bes += 1;
-        const rr = realizedRRForTrade(t);
-        if (rr !== null && !Number.isNaN(rr)) { e.rrSum += rr; e.rrCount += 1; }
-        const pts = realizedPointsForTrade(t);
-        if (pts !== null && !Number.isNaN(pts)) { e.ptsSum += pts; e.ptsCount += 1; }
-      });
-    });
-    return Array.from(map.values())
-      .map((e) => {
-        const decided = e.wins + e.losses;
-        return {
-          ...e,
-          winrate: decided ? (e.wins / decided) * 100 : 0,
-          avgRR: e.rrCount ? e.rrSum / e.rrCount : 0,
-          avgPoints: e.ptsCount ? e.ptsSum / e.ptsCount : 0,
-        };
-      })
-      .sort((a, b) => b.count - a.count);
-  }, [filteredTrades, realizedRRForTrade, realizedPointsForTrade]);
-  const maxConfluenceCount = Math.max(1, ...confluenceStats.map((c) => c.count));
-
   // ── Setup-Auswertung ──
-  // Analog zur Confluence-Analyse, aber nach dem (einzelnen) Setup-Feld gruppiert.
+  // Gruppiert nach dem (einzelnen) Setup-Feld.
   // Respektiert ebenfalls die Symbol-/Ergebnis-Filter aus der Filterleiste.
   const setupStats = useMemo(() => {
     const map = new Map();
@@ -2836,7 +3122,7 @@ notify pgrst, 'reload schema';`;
     <div className="journal-shell">
       <header className="topbar">
         <div className="brand">
-            <img src="sharingan.png" alt="Logo" style={{ width: "220px", height: "100px", borderRadius: "10px" }} />
+            <img src="sharingan.png" alt="Logo" style={{ width: "220px", height: "120px", borderRadius: "10px" }} />
         </div>
         <div className="topbar-actions">
           {!fundedStage && accountStats.accountPassed && (
@@ -2869,7 +3155,7 @@ notify pgrst, 'reload schema';`;
             Forward Test
           </button>
           <button className="btn-primary" onClick={() => setPanelOpen(true)}>
-            <Icon.Plus /> {T("Trade hinzufuegen", "Add trade")} <span className="kbd-hint">N</span>
+            <Icon.Plus /> {T("Trade hinzufügen", "Add trade")} <span className="kbd-hint">N</span>
           </button>
         </div>
       </header>
@@ -2953,6 +3239,8 @@ notify pgrst, 'reload schema';`;
           <EquityCurve data={accountStats.equityCurve} />
         </div>
       </section>
+
+      <DailyBriefing trades={allTrades} />
 
       {fundedStage && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "4px" }}>
@@ -3052,10 +3340,12 @@ notify pgrst, 'reload schema';`;
                     }} />
                   </div>
                   {/* Labels */}
-                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: "7px", fontSize: "11px" }}>
-                    <span style={{ color: "rgba(224,0,26,0.8)" }}>{fmtMoney(scaleLeft)}</span>
-                    <span style={{ color: "var(--muted-light)" }}>{fmtMoney(STARTING_BALANCE)}</span>
-                    <span style={{ color: passed ? "#2ecc71" : "var(--muted-light)" }}>{fmtMoney(ACCOUNT_PASS_TARGET)} ✓</span>
+                  <div style={{ position: "relative", height: "14px", marginTop: "7px", fontSize: "11px" }}>
+                    <span style={{ position: "absolute", left: 0, color: "rgba(224,0,26,0.8)" }}>{fmtMoney(scaleLeft)}</span>
+                    {startMarkerPct > 0.5 && (
+                      <span style={{ position: "absolute", left: `${startMarkerPct}%`, transform: "translateX(-50%)", color: "var(--muted-light)" }}>{fmtMoney(STARTING_BALANCE)}</span>
+                    )}
+                    <span style={{ position: "absolute", right: 0, color: passed ? "#2ecc71" : "var(--muted-light)" }}>{fmtMoney(ACCOUNT_PASS_TARGET)} ✓</span>
                   </div>
                 </div>
               );
@@ -3241,31 +3531,6 @@ notify pgrst, 'reload schema';`;
       </section>
 
       <section className="insights-card">
-        <div className="insights-title">{T("Confluence-Analyse", "Confluence analysis")}</div>
-        {confluenceStats.length === 0 ? (
-          <span className="insight-sub">{T("Noch keine Trades mit Confluences erfasst. Füge beim nächsten Trade Confluences hinzu, um hier Statistiken zu sehen.", "No trades with confluences recorded yet. Add confluences to your next trade to see statistics here.")}</span>
-        ) : (
-          <div className="trade-list">
-            {confluenceStats.map((c) => (
-              <div className="breakdown-row" key={c.tag} style={{ gap: "12px" }}>
-                <span className="breakdown-label" style={{ width: "140px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={tagText(c.tag)}>{tagText(c.tag)}</span>
-                <div className="breakdown-bar-track">
-                  <div
-                    className={`breakdown-bar-fill ${c.winrate < 50 ? "neg" : ""}`}
-                    style={{ width: `${Math.min(100, (c.count / maxConfluenceCount) * 100)}%` }}
-                  />
-                </div>
-                <span className={`breakdown-value ${c.winrate >= 50 ? "pos" : "neg"}`} style={{ width: "64px" }}>{c.winrate.toFixed(0)}% WR</span>
-                <span className="breakdown-value" style={{ width: "76px" }}>{c.avgRR ? `${c.avgRR.toFixed(2)}R` : "—"}</span>
-                <span className="breakdown-value" style={{ width: "88px" }}>{c.avgPoints ? `${c.avgPoints >= 0 ? "+" : ""}${c.avgPoints.toFixed(1)} ${T("Pkt", "pts")}` : "—"}</span>
-                <span className="breakdown-count">{c.count}x</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="insights-card">
         <div className="insights-title">{T(`Top Confluence-Kombinationen (ab ${MIN_COMBO_SAMPLE} Trades)`, `Top confluence combinations (from ${MIN_COMBO_SAMPLE} trades)`)}</div>
         {comboStats.length === 0 ? (
           <span className="insight-sub">{T(`Noch nicht genug Trades mit mehreren gemeinsamen Confluences, um Kombinationen zu ranken (mind. ${MIN_COMBO_SAMPLE} Trades je Kombination nötig).`, `Not enough trades with multiple shared confluences yet to rank combinations (at least ${MIN_COMBO_SAMPLE} trades per combination required).`)}</span>
@@ -3405,9 +3670,9 @@ notify pgrst, 'reload schema';`;
                   </button>
                 );
               })}
-              <div className="cal-cell cal-weeksum">
+              <div className={`cal-cell cal-weeksum ${week.weekTradeCount === 0 ? "cal-weeksum-empty" : ""}`}>
                 <span className="cal-weeknum">{T("KW", "Wk")} {week.weekNum ?? "—"}</span>
-                <span className={`cal-weekpnl ${week.weekPnl >= 0 ? "pos" : "neg"}`}>
+                <span className={`cal-weekpnl ${week.weekTradeCount === 0 ? "none" : week.weekPnl >= 0 ? "pos" : "neg"}`}>
                   {week.weekTradeCount ? fmtMoneyShort(week.weekPnl) : "—"}
                 </span>
                 {week.weekTradeCount > 0 && (
@@ -3419,6 +3684,8 @@ notify pgrst, 'reload schema';`;
           })
         )}
       </section>
+
+      <DailyNotes trades={allTrades} />
 
       {panelOpen && (
         <AddTradePanel
@@ -3494,6 +3761,358 @@ const fmtPct = (x, d = 0) => (Number.isFinite(x) ? `${(x * 100).toFixed(d)}%` : 
 const fmtR = (x) => (Number.isFinite(x) ? `${x >= 0 ? "+" : ""}${x.toFixed(2)}R` : "—");
 const toneOf = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
 const SMALL_SAMPLE = 30;
+
+/* ============================================================
+   Tages-Briefing: wertet ALLE bisherigen Trades (alle Konten) aus und sagt, worauf heute zu achten ist.
+   Heute zaehlt nicht mit. Aussagen entstehen nur bei ausreichender Stichprobe.
+   ============================================================ */
+const WEEKDAY_NAMES = [
+  [T("Sonntag", "Sunday"), T("sonntags", "Sundays")],
+  [T("Montag", "Monday"), T("montags", "Mondays")],
+  [T("Dienstag", "Tuesday"), T("dienstags", "Tuesdays")],
+  [T("Mittwoch", "Wednesday"), T("mittwochs", "Wednesdays")],
+  [T("Donnerstag", "Thursday"), T("donnerstags", "Thursdays")],
+  [T("Freitag", "Friday"), T("freitags", "Fridays")],
+  [T("Samstag", "Saturday"), T("samstags", "Saturdays")],
+];
+const dayOfWeekOf = (s) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || "");
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getDay() : null;
+};
+const localDateStr = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const num1 = (x) => (IS_EN ? x.toFixed(1) : x.toFixed(1).replace(".", ","));
+const capFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+function dailyBriefing(list, today = new Date()) {
+  const dow = today.getDay();
+  const todayStr = localDateStr(today);
+  const [dayName, dayPl] = WEEKDAY_NAMES[dow];
+  const past = sortChrono(list.filter((t) => t.trade_date && t.trade_date < todayStr));
+  const byDate = new Map();
+  past.forEach((t) => {
+    if (!byDate.has(t.trade_date)) byDate.set(t.trade_date, []);
+    byDate.get(t.trade_date).push(t);
+  });
+  const days = Array.from(byDate.entries()).map(([date, arr]) => {
+    const known = arr.filter((t) => t.plan_followed === true || t.plan_followed === false);
+    return {
+      date,
+      dow: dayOfWeekOf(date),
+      n: arr.length,
+      pnl: arr.reduce((s, t) => s + Number(t.pnl || 0), 0),
+      noPlan: known.filter((t) => t.plan_followed === false).length,
+      known: known.length,
+    };
+  });
+  const base = { dayName, dayPl, dayCount: days.length, tradeCount: past.length };
+  if (days.length < 5) return { ...base, enough: false, sameCount: 0, items: [] };
+
+  const same = days.filter((d) => d.dow === dow);
+  const recent = same.slice(-4);
+  const avgN = (arr) => mean(arr.map((d) => d.n));
+  const avgPnl = (arr) => mean(arr.map((d) => d.pnl));
+  const greenShare = (arr) => (arr.length ? arr.filter((d) => d.pnl > 0).length / arr.length : 0);
+  const noPlanShare = (arr, minKnown) => {
+    const k = arr.reduce((s, d) => s + d.known, 0);
+    return k >= minKnown ? arr.reduce((s, d) => s + d.noPlan, 0) / k : null;
+  };
+  const items = [];
+  const push = (tone, score, short, detail) => items.push({ tone, score, short, detail });
+  const sameOk = same.length >= 2;
+
+  if (sameOk) {
+    // 1) Zu viele Trades an diesem Wochentag
+    const nAll = avgN(days), nSame = avgN(same), nRec = avgN(recent);
+    if (nSame >= nAll * 1.25 && nSame - nAll >= 0.7) {
+      const rising = recent.length >= 3 && nRec >= nSame * 1.15;
+      push("warn", 90 + (nSame - nAll),
+        T(`${capFirst(dayPl)} nimmst du tendenziell zu viele Trades.`, `You tend to take too many trades on ${dayPl}.`),
+        T(
+          `Ø ${num1(nSame)} Trades pro ${dayName} gegen Ø ${num1(nAll)} an allen Tagen (${same.length} Handelstage ausgewertet)${rising ? `, zuletzt sogar Ø ${num1(nRec)}` : ""}.`,
+          `Avg ${num1(nSame)} trades per ${dayName} versus avg ${num1(nAll)} across all days (${same.length} trading days)${rising ? `, recently even avg ${num1(nRec)}` : ""}.`
+        ));
+    }
+    // 2) Trades ohne Plan an diesem Wochentag
+    const sAll = noPlanShare(days, 5), sSame = noPlanShare(same, 5), sRec = noPlanShare(recent, 3);
+    const recentWorse = sRec !== null && sRec >= 0.4 && sRec > (sAll ?? 0) + 0.1;
+    const sameWorse = sSame !== null && sSame >= 0.2 && sSame >= (sAll ?? 0) + 0.08;
+    if (recentWorse || sameWorse) {
+      const partsDe = [sSame !== null && `${fmtPct(sSame)} ${dayPl}`, sAll !== null && `${fmtPct(sAll)} insgesamt`, sRec !== null && `zuletzt ${fmtPct(sRec)}`].filter(Boolean).join(", ");
+      const partsEn = [sSame !== null && `${fmtPct(sSame)} on ${dayPl}`, sAll !== null && `${fmtPct(sAll)} overall`, sRec !== null && `recently ${fmtPct(sRec)}`].filter(Boolean).join(", ");
+      push("warn", 95,
+        T(`${capFirst(dayPl)} kommen öfter Trades ohne Plan vor${recentWorse ? " – zuletzt verstärkt" : ""}.`, `Trades without a plan happen more often on ${dayPl}${recentWorse ? " – more so lately" : ""}.`),
+        T(`Anteil ohne Plan: ${partsDe}.`, `Share without a plan: ${partsEn}.`));
+    } else if (sSame !== null && sAll !== null && sSame <= 0.1 && sAll - sSame >= 0.1) {
+      push("good", 40,
+        T(`${capFirst(dayPl)} hältst du dich gut an deinen Plan.`, `You stick to your plan well on ${dayPl}.`),
+        T(`Nur ${fmtPct(sSame)} ohne Plan ${dayPl} gegen ${fmtPct(sAll)} insgesamt.`, `Only ${fmtPct(sSame)} without a plan on ${dayPl} versus ${fmtPct(sAll)} overall.`));
+    }
+    // 3) Ergebnis an diesem Wochentag
+    if (same.length >= 3) {
+      const gS = greenShare(same), gA = greenShare(days), pS = avgPnl(same), pA = avgPnl(days);
+      const plus = same.filter((d) => d.pnl > 0).length;
+      if (pS < 0 && gS <= 0.4 && gS < gA) {
+        push("warn", 85,
+          T(`${dayName} lief bisher schwach – lieber selektiv bleiben.`, `${dayName} has been weak so far – stay selective.`),
+          T(`${plus} von ${same.length} Tagen im Plus (insgesamt ${fmtPct(gA)}), Ø ${fmtMoneyShort(pS)} pro Tag.`, `${plus} of ${same.length} days in profit (${fmtPct(gA)} overall), avg ${fmtMoneyShort(pS)} per day.`));
+      } else if (pS > 0 && pS > pA && gS >= 0.6 && gS > gA) {
+        push("good", 50,
+          T(`${dayName} läuft bei dir überdurchschnittlich – bleib bei deinem Ablauf.`, `${dayName} runs above average for you – stick to your routine.`),
+          T(`${plus} von ${same.length} Tagen im Plus (insgesamt ${fmtPct(gA)}), Ø ${fmtMoneyShort(pS)} pro Tag.`, `${plus} of ${same.length} days in profit (${fmtPct(gA)} overall), avg ${fmtMoneyShort(pS)} per day.`));
+      }
+    }
+  }
+
+  // 4) Folgen der letzten Tage (unabhängig vom Wochentag)
+  const last = days[days.length - 1];
+  let redRun = 0;
+  for (let i = days.length - 1; i >= 0 && days[i].pnl < 0; i--) redRun++;
+  let lossRun = 0;
+  for (let i = past.length - 1; i >= 0 && past[i].result === "loss"; i--) lossRun++;
+  if (redRun >= 2) {
+    push("warn", 88,
+      T(`Du kommst von ${redRun} roten Tagen in Folge – heute kleiner und selektiver starten.`, `You come off ${redRun} red days in a row – start smaller and more selective today.`),
+      T(`Letzter Handelstag: ${last.date}, ${fmtMoneyShort(last.pnl)}.`, `Last trading day: ${last.date}, ${fmtMoneyShort(last.pnl)}.`));
+  } else if (lossRun >= 3) {
+    push("warn", 80,
+      T(`Deine letzten ${lossRun} Trades waren Verluste – nicht versuchen, es sofort zurückzuholen.`, `Your last ${lossRun} trades were losses – don't try to win it back right away.`),
+      T(`Letzter Handelstag: ${last.date}, ${fmtMoneyShort(last.pnl)}.`, `Last trading day: ${last.date}, ${fmtMoneyShort(last.pnl)}.`));
+  }
+  if (last.pnl < 0) {
+    const afterRed = [], afterGreen = [];
+    for (let i = 1; i < days.length; i++) (days[i - 1].pnl < 0 ? afterRed : afterGreen).push(days[i]);
+    if (afterRed.length >= 4 && afterGreen.length >= 4) {
+      const nR = avgN(afterRed), nG = avgN(afterGreen);
+      if (nR >= nG * 1.25 && nR - nG >= 0.7) {
+        push("warn", 87,
+          T("Nach roten Tagen nimmst du mehr Trades – heute bewusst bremsen.", "After red days you take more trades – deliberately slow down today."),
+          T(
+            `Ø ${num1(nR)} Trades nach roten gegen Ø ${num1(nG)} nach grünen Tagen; Ø Tages-PnL ${fmtMoneyShort(avgPnl(afterRed))} gegen ${fmtMoneyShort(avgPnl(afterGreen))}.`,
+            `Avg ${num1(nR)} trades after red versus avg ${num1(nG)} after green days; avg daily PnL ${fmtMoneyShort(avgPnl(afterRed))} versus ${fmtMoneyShort(avgPnl(afterGreen))}.`
+          ));
+      }
+    }
+  }
+
+  // 5) Aufstocken nach Verlust, 6) Tageslimit, 7) schwächste Uhrzeit (allgemein)
+  const b = behaviorStats(past);
+  if (b.bigger.n >= 4 && b.notBigger.n >= 4 && b.bigger.avgPnl < b.notBigger.avgPnl) {
+    push("warn", 75,
+      T("Nach einem Verlust nicht aufstocken.", "Don't size up after a loss."),
+      T(`Mit mehr Contracts nach Verlust: Ø ${fmtMoneyShort(b.bigger.avgPnl)} (${b.bigger.n} Trades) gegen Ø ${fmtMoneyShort(b.notBigger.avgPnl)} bei gleicher oder kleinerer Größe (${b.notBigger.n}).`,
+        `Sizing up after a loss: avg ${fmtMoneyShort(b.bigger.avgPnl)} (${b.bigger.n} trades) versus avg ${fmtMoneyShort(b.notBigger.avgPnl)} with same or smaller size (${b.notBigger.n}).`));
+  }
+  const few = days.filter((d) => d.n <= 2), many = days.filter((d) => d.n >= 3);
+  if (few.length >= 3 && many.length >= 3 && avgPnl(many) < avgPnl(few)) {
+    push("warn", 70,
+      T("Ab dem 3. Trade kippt dein Tag häufig.", "Your day often tips after the 3rd trade."),
+      T(`Ø ${fmtMoneyShort(avgPnl(many))} an Tagen mit 3+ Trades (${many.length} Tage) gegen Ø ${fmtMoneyShort(avgPnl(few))} bei 1–2 Trades (${few.length} Tage).`,
+        `Avg ${fmtMoneyShort(avgPnl(many))} on days with 3+ trades (${many.length} days) versus avg ${fmtMoneyShort(avgPnl(few))} with 1–2 trades (${few.length} days).`));
+  }
+  const worstHour = b.byHour.filter((h) => h.n >= 5 && h.pnl < 0).sort((x, y) => x.pnl / x.n - y.pnl / y.n)[0];
+  if (worstHour) {
+    const hh = String(worstHour.hour).padStart(2, "0");
+    push("info", 60,
+      T(`Deine schwächste Einstiegszeit ist ${hh}:00 Uhr.`, `Your weakest entry time is ${hh}:00.`),
+      T(`Ø ${fmtMoneyShort(worstHour.pnl / worstHour.n)} pro Trade bei ${worstHour.n} Trades in dieser Stunde.`, `Avg ${fmtMoneyShort(worstHour.pnl / worstHour.n)} per trade over ${worstHour.n} trades in that hour.`));
+  }
+
+  if (!items.length) {
+    push("good", 10,
+      T("Keine Auffälligkeiten in deinen bisherigen Daten – bleib bei deinem Plan.", "Nothing stands out in your data so far – stick to your plan."),
+      T("Weder Overtrading noch Plan-Brüche oder Tilt-Muster überschreiten die Schwellen.", "No overtrading, plan breaks or tilt patterns cross the thresholds."));
+  }
+  const rank = { warn: 0, good: 1, info: 2 };
+  items.sort((x, y) => rank[x.tone] - rank[y.tone] || y.score - x.score);
+  return { ...base, enough: true, sameCount: same.length, items };
+}
+
+function DailyBriefing({ trades }) {
+  const [open, setOpen] = useState(false);
+  const todayKey = localDateStr();
+  const b = useMemo(() => dailyBriefing(trades), [trades, todayKey]);
+  if (!trades.length) return null;
+  const shown = open ? b.items : b.items.slice(0, 2);
+  const hidden = b.items.length - shown.length;
+  return (
+    <section className="brief-card">
+      <div className="brief-head">
+        <span className="brief-title">{T("Tages-Briefing", "Daily briefing")}</span>
+        <span className="brief-day">{b.dayName}</span>
+      </div>
+      {!b.enough ? (
+        <span className="brief-detail">
+          {T(
+            `Noch zu wenig Daten (${b.dayCount} Handelstage). Ab 5 Handelstagen kommen hier persönliche Hinweise aus deinen Trades.`,
+            `Not enough data yet (${b.dayCount} trading days). Personal hints from your trades appear after 5 trading days.`
+          )}
+        </span>
+      ) : (
+        <>
+          <div className="brief-list">
+            {shown.map((it) => (
+              <div className={`brief-item ${it.tone}`} key={it.short}>
+                <span className="brief-short">{it.short}</span>
+                {open && <span className="brief-detail">{it.detail}</span>}
+              </div>
+            ))}
+          </div>
+          <button className="brief-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+            {open ? T("Weniger anzeigen", "Show less") : hidden > 0 ? T(`Mehr anzeigen (+${hidden})`, `Show more (+${hidden})`) : T("Details anzeigen", "Show details")}
+          </button>
+          {open && (
+            <span className="brief-foot">
+              {T(
+                `Basis: ${b.tradeCount} Trades an ${b.dayCount} Handelstagen (alle Konten, ohne heute)${b.sameCount >= 2 ? ` · ${b.sameCount} ${b.dayName}-Handelstage` : ` · für ${b.dayName} erst ${b.sameCount} Handelstage, daher allgemeine Hinweise`}.`,
+                `Based on ${b.tradeCount} trades across ${b.dayCount} trading days (all accounts, excluding today)${b.sameCount >= 2 ? ` · ${b.sameCount} ${b.dayName} trading days` : ` · only ${b.sameCount} ${b.dayName} trading days so far, so general hints`}.`
+              )}
+            </span>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+const loadDayNotes = () => {
+  try {
+    const o = JSON.parse(localStorage.getItem(NOTES_LS_KEY) || "{}");
+    return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+  } catch { return {}; }
+};
+const fmtNoteDate = (k) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(k || "");
+  if (!m) return k;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(LOCALE, { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+};
+
+// Tagesnotizen: optionaler Kurz-Recap pro Tag. Liegt im Browser und wird (wie Konten und Payouts) ueber die
+// Settings-Tabelle in Supabase gesichert, sofern es diese Tabelle gibt.
+function DailyNotes({ trades }) {
+  const [notes, setNotes] = useState(loadDayNotes);
+  const [date, setDate] = useState(() => localDateStr());
+  const [draft, setDraft] = useState(() => loadDayNotes()[localDateStr()] || "");
+  const [saved, setSaved] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+  const timer = React.useRef(null);
+  const touched = React.useRef(false);
+  const pending = React.useRef(null);
+  const dateRef = React.useRef(date);
+  dateRef.current = date;
+
+  const persist = useCallback((d, text) => {
+    const next = { ...loadDayNotes() };
+    if (text.trim()) next[d] = text; else delete next[d];
+    try { localStorage.setItem(NOTES_LS_KEY, JSON.stringify(next)); } catch {}
+    setNotes(next);
+  }, []);
+  const flush = useCallback(() => {
+    clearTimeout(timer.current);
+    if (pending.current) {
+      persist(pending.current.date, pending.current.text);
+      pending.current = null;
+      setSaved(true);
+    }
+  }, [persist]);
+
+  // Nach dem Sync mit der Datenbank neu laden, aber nur wenn noch nichts getippt wurde.
+  useEffect(() => {
+    Promise.resolve(window.__settingsReady).then(() => {
+      if (touched.current) return;
+      const fresh = loadDayNotes();
+      setNotes(fresh);
+      setDraft(fresh[dateRef.current] || "");
+    });
+  }, []);
+  // Beim Verlassen der Seite oder des Tabs sofort speichern.
+  useEffect(() => {
+    window.addEventListener("pagehide", flush);
+    return () => { window.removeEventListener("pagehide", flush); flush(); };
+  }, [flush]);
+
+  const onChange = (e) => {
+    const text = e.target.value;
+    touched.current = true;
+    setDraft(text);
+    setSaved(false);
+    pending.current = { date, text };
+    clearTimeout(timer.current);
+    timer.current = setTimeout(flush, 700);
+  };
+  const changeDate = (d) => {
+    if (!d) return;
+    flush();
+    setDate(d);
+    setDraft(loadDayNotes()[d] || "");
+  };
+
+  const byDay = useMemo(() => {
+    const m = new Map();
+    trades.forEach((t) => {
+      if (!t.trade_date) return;
+      const g = m.get(t.trade_date) || { n: 0, pnl: 0 };
+      g.n += 1;
+      g.pnl += Number(t.pnl || 0);
+      m.set(t.trade_date, g);
+    });
+    return m;
+  }, [trades]);
+  const day = byDay.get(date);
+  const keys = Object.keys(notes).filter((k) => typeof notes[k] === "string" && notes[k].trim()).sort().reverse();
+  const listed = showAll ? keys : keys.slice(0, 5);
+
+  return (
+    <section className="notes-card">
+      <div className="notes-head">
+        <span className="notes-title">{T("Tagesnotizen", "Daily notes")}</span>
+        <input type="date" className="notes-date" value={date} max={localDateStr()} onChange={(e) => changeDate(e.target.value)} />
+      </div>
+      <span className="notes-meta">
+        {day ? (
+          <>
+            {T(`${day.n} Trade${day.n === 1 ? "" : "s"} an diesem Tag · `, `${day.n} trade${day.n === 1 ? "" : "s"} that day · `)}
+            <span className={`notes-pnl ${toneOf(day.pnl)}`}>{fmtMoneyShort(day.pnl)}</span>
+          </>
+        ) : T("Keine Trades an diesem Tag", "No trades that day")}
+      </span>
+      <textarea
+        className="notes-area"
+        value={draft}
+        onChange={onChange}
+        onBlur={flush}
+        placeholder={T("Kurzer Recap zum Tag: Was lief gut, was würde ich anders machen?", "Short recap of the day: what went well, what would I do differently?")}
+      />
+      <span className="notes-foot">
+        {!saved ? T("Speichert …", "Saving …") : draft.trim() ? T("Gespeichert", "Saved") : T("Optional, nur wenn du magst", "Optional, only if you like")}
+      </span>
+      {keys.length > 0 && (
+        <>
+          <div className="insights-col-title" style={{ marginTop: 6, marginBottom: 0 }}>{T("Letzte Notizen", "Recent notes")}</div>
+          <div className="notes-list">
+            {listed.map((k) => {
+              const g = byDay.get(k);
+              return (
+                <button type="button" key={k} className={`notes-item ${k === date ? "active" : ""}`} onClick={() => changeDate(k)}>
+                  <span className="notes-item-head">
+                    <span>{fmtNoteDate(k)}</span>
+                    {g && <span className={`notes-pnl ${toneOf(g.pnl)}`}>{g.n}× · {fmtMoneyShort(g.pnl)}</span>}
+                  </span>
+                  <span className="notes-item-text">{notes[k]}</span>
+                </button>
+              );
+            })}
+          </div>
+          {keys.length > 5 && (
+            <button type="button" className="brief-toggle" onClick={() => setShowAll((v) => !v)}>
+              {showAll ? T("Weniger anzeigen", "Show less") : T(`Alle anzeigen (${keys.length})`, `Show all (${keys.length})`)}
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
 
 function Metric({ label, value, sub, tone = "" }) {
   return (
