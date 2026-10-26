@@ -33,7 +33,7 @@
     margin: 0; padding: 0;
     background: var(--bg); color: var(--text);
     font-family: 'JetBrains Mono', 'Courier New', monospace;
-    min-height: 100vh;
+    min-height: 100vh;  
   }
   #root { min-height: 100vh; }
 
@@ -221,7 +221,7 @@
   .notes-item:hover { border-color: var(--muted-light); }
   .notes-item.active { border-left: 3px solid var(--red); }
   .notes-item-head { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: var(--muted-light); font-family: 'JetBrains Mono', monospace; }
-  .notes-item-text { font-size: 13px; line-height: 1.45; color: var(--text); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .notes-item-text { font-size: 13px; line-height: 1.45; color: var(--text); white-space: pre-wrap; display: webkit-box 3; -webkit-box-orient: vertical; overflow: hidden; }
 
   /*  Toast  */
   .toast-stack { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 10px; z-index: 100; }
@@ -1931,6 +1931,8 @@ function TradingJournal() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [forwardTestOpen, setForwardTestOpen] = useState(false);
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const [pfOpen, setPfOpen] = useState(false); // PORTFOLIO
+  const [newsOpen, setNewsOpen] = useState(false); // NEWS
   const [saving, setSaving] = useState(false);
   const [cursor, setCursor] = useState(() => {
     const n = new Date();
@@ -2929,6 +2931,7 @@ function TradingJournal() {
   // Datenbanken der Freunde nachgefragt (nur lesend, wie im Freunde-Fenster). Kommt ein Trade mit
   // hoeherer ID als beim letzten Mal dazu, gibt es eine Browser-Benachrichtigung + Toast.
   // Beim ersten Durchlauf pro Freund wird nur der aktuelle Stand gemerkt (keine Flut alter Meldungen).
+  /* ===== ALERTS (vorübergehend deaktiviert – zum Reaktivieren dieses Kommentar-Ende und die Platzhalter unten entfernen) =====
   const notifProfileId = ACTIVE_PROFILE ? ACTIVE_PROFILE.id : "x";
   const notifKey = `journal_notif__${notifProfileId}`;
   const notifSeenKey = `journal_notif_seen__${notifProfileId}`;
@@ -3019,6 +3022,10 @@ function TradingJournal() {
     document.addEventListener("visibilitychange", onVisible);
     return () => { stopped = true; clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
   }, [notifOn, notifSeenKey, pushToast]);
+  ===== ENDE ALERTS ===== */
+  // Platzhalter, solange Alerts auskommentiert sind (beim Reaktivieren löschen)
+  const notifOn = false;
+  const notifSupported = false;
 
   // ── Automatische Datenbank-Pruefung ──
   // Fehlt in der Supabase-Datenbank etwas (Tabelle/Spalte/Policy), erscheint oben ein Hinweis mit einem
@@ -3076,6 +3083,7 @@ notify pgrst, 'reload schema';`;
     catch { pushToast(T("Kopieren nicht möglich — SQL unten markieren und kopieren", "Copy not possible — select and copy the SQL below"), "error"); }
   };
   const sqlEditorUrl = `https://supabase.com/dashboard/project/${String(SUPABASE_URL).replace(/^https?:\/\//, "").split(".")[0]}/sql/new`;
+  /* ALERTS-Hinweis (deaktiviert)
   // Einmaliger Hinweis auf die Benachrichtigungen (Browser verlangen einen eigenen Klick fuer die Erlaubnis)
   useEffect(() => {
     try {
@@ -3085,6 +3093,7 @@ notify pgrst, 'reload schema';`;
       }
     } catch {}
   }, []);
+  ENDE ALERTS-Hinweis */
 
   const today = new Date();
   const isCurrentMonthNow = cursor.year === today.getFullYear() && cursor.month === today.getMonth();
@@ -3141,6 +3150,7 @@ notify pgrst, 'reload schema';`;
           <button className="btn-secondary" onClick={switchProfile} title={T("Profil wechseln", "Switch profile")}>
             {ACTIVE_PROFILE ? ACTIVE_PROFILE.name : T("Profil", "Profile")} ⇄
           </button>
+          {/* ALERTS-Button (deaktiviert)
           <button
             className={`btn-secondary ${notifOn ? "active" : ""}`}
             onClick={toggleNotifications}
@@ -3148,9 +3158,16 @@ notify pgrst, 'reload schema';`;
           >
             {notifOn ? T("Alerts an", "Alerts on") : T("Alerts aus", "Alerts off")}
           </button>
+          ENDE ALERTS-Button */}
           <button className="btn-secondary" onClick={() => setFriendsOpen(true)} title={T("Kalender, Stats & Equity mit Freunden vergleichen", "Compare calendar, stats & equity with friends")}>
             {T("Freunde", "Friends")}
           </button>
+          {ACTIVE_PROFILE && ACTIVE_PROFILE.id === "cody" && (
+            <button className="btn-secondary" onClick={() => setPfOpen(true)}>Portfolio</button>
+          )}
+          {ACTIVE_PROFILE && ACTIVE_PROFILE.id === "cody" && (
+            <button className="btn-secondary" onClick={() => setNewsOpen(true)}>News</button>
+          )}
           <button className="btn-secondary" onClick={() => setForwardTestOpen(true)}>
             Forward Test
           </button>
@@ -3719,6 +3736,9 @@ notify pgrst, 'reload schema';`;
           onConfirm={(vals) => createAccount({ ...vals, archiveCurrent: accountPanel === "reset" })}
         />
       )}
+
+      {pfOpen && <PortfolioPanel onClose={() => setPfOpen(false)} />}
+      {newsOpen && <NewsPanel onClose={() => setNewsOpen(false)} trades={trades} />}
 
       {friendsOpen && (
         <FriendsPanel onClose={() => setFriendsOpen(false)} myTrades={trades} />
@@ -6906,6 +6926,335 @@ function FriendsPanel({ onClose, myTrades }) {
         </div>
       )}
     </React.Fragment>
+  );
+}
+
+/* ===== PORTFOLIO (nur Profil "cody", Passwortsperre) ===== */
+const PF_ASSETS = {
+  msci: { name: "iShares Core MSCI World", sym: "EUNL.DE", cur: "EUR" },
+  nvda: { name: "NVIDIA", sym: "NVDA", cur: "USD" },
+  ttwo: { name: "Take-Two Interactive", sym: "TTWO", cur: "USD" },
+  btc: { name: "Bitcoin", sym: "BTC-EUR", cur: "EUR" },
+  gold: { name: "Gold Turbo Long (KO 3.674,73)", sym: "GC=F", cur: "USD", ko: { strike: 3674.7341, ratio: 0.01 } },
+};
+const PF_MONO = "'JetBrains Mono', monospace";
+const PF_H = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "Content-Type": "application/json" };
+const PF_TX = `${SUPABASE_URL}/rest/v1/portfolio_tx`;
+const PF_SET = `${SUPABASE_URL}/rest/v1/Settings`;
+const pfHash = async (pw) => { const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("pf:" + pw)); return Array.from(new Uint8Array(b)).map((x) => x.toString(16).padStart(2, "0")).join(""); };
+const pfEur = (n) => (n == null || isNaN(n) ? "–" : n.toLocaleString("de-DE", { style: "currency", currency: "EUR" }));
+const pfPct = (n) => (n == null || isNaN(n) ? "–" : (n >= 0 ? "+" : "") + n.toFixed(2).replace(".", ",") + " %");
+const pfIso = (d) => d.toISOString().slice(0, 10);
+const pfTone = (n) => (n == null || isNaN(n) ? "var(--muted-light)" : n >= 0 ? "var(--green)" : "var(--red)");
+
+function pfCompute(txs, quotes, manualKo) {
+  const days = [];
+  for (let i = 400; i >= 0; i--) days.push(pfIso(new Date(Date.now() - i * 864e5)));
+  const today = days[days.length - 1];
+  const fill = (q) => {
+    if (!q || !q.t) return null;
+    const m = {};
+    q.t.forEach((t, i) => { if (q.c[i] != null) m[pfIso(new Date(t * 1000))] = q.c[i]; });
+    let last = null; const o = {};
+    days.forEach((d) => { if (m[d] != null) last = m[d]; o[d] = last; });
+    if (q.price != null) o[today] = q.price;
+    return o;
+  };
+  const fxS = fill(quotes["EURUSD=X"]);
+  const px = {};
+  Object.entries(PF_ASSETS).forEach(([k, a]) => {
+    const s = fill(quotes[a.sym]);
+    if (!s || !fxS) return;
+    px[k] = {};
+    days.forEach((d) => {
+      const v = s[d], r = fxS[d];
+      if (v == null || ((a.cur === "USD" || a.ko) && r == null)) { px[k][d] = null; return; }
+      px[k][d] = a.ko ? (Math.max(0, v - a.ko.strike) * a.ko.ratio) / r : a.cur === "USD" ? v / r : v;
+    });
+    if (a.ko && manualKo) px[k][today] = manualKo;
+  });
+  const sorted = [...txs].sort((a, b) => a.tx_date.localeCompare(b.tx_date) || a.id - b.id);
+  const qtyAt = (k, d) => sorted.reduce((s, t) => (t.asset === k && t.tx_date <= d ? s + (t.side === "buy" ? t.qty : -t.qty) : s), 0);
+  const series = days.map((d) => ({ d, v: Object.keys(px).reduce((s, k) => s + qtyAt(k, d) * (px[k][d] || 0), 0) }));
+  const flow = (ref) => sorted.reduce((s, t) => (t.tx_date > ref ? s + (t.side === "buy" ? t.qty * t.price + (t.fee || 0) : -(t.qty * t.price) + (t.fee || 0)) : s), 0);
+  const now = series[series.length - 1].v;
+  const back = (n) => days[Math.max(0, days.length - 1 - n)];
+  const mo = new Date(); mo.setMonth(mo.getMonth() - 1);
+  const refs = { Tag: back(1), Woche: back(7), Monat: pfIso(mo), Jahr: back(365), YTD: `${new Date().getFullYear() - 1}-12-31` };
+  const perf = Object.entries(refs).map(([label, ref]) => {
+    const v0 = (series.find((x) => x.d === ref) || series[0]).v, f = flow(ref), pnl = now - v0 - f, base = v0 + f;
+    return { label, pnl, pct: base > 0 ? (pnl / base) * 100 : null };
+  });
+  const rows = Object.entries(PF_ASSETS).map(([k, a]) => {
+    let qty = 0, cost = 0;
+    sorted.filter((t) => t.asset === k).forEach((t) => {
+      if (t.side === "buy") { qty += t.qty; cost += t.qty * t.price + (t.fee || 0); }
+      else { cost -= (qty ? cost / qty : 0) * t.qty; qty -= t.qty; }
+    });
+    const p = px[k] ? px[k][today] : null, p1 = px[k] ? px[k][days[days.length - 2]] : null;
+    return { k, a, qty, cost, p, value: p != null ? qty * p : null, day: p != null && p1 ? (p / p1 - 1) * 100 : null, gain: p != null ? qty * p - cost : null };
+  }).filter((r) => r.qty > 1e-9);
+  const g = quotes["GC=F"] && quotes["GC=F"].price, K = PF_ASSETS.gold.ko;
+  return { series, perf, rows, now, ko: g ? { dist: ((g - K.strike) / g) * 100, lev: g / (g - K.strike) } : null };
+}
+
+/* ===== NEWS (Wirtschaftskalender, nur Profil "cody") ===== */
+function NewsPanel({ onClose, trades }) {
+  const [ev, setEv] = useState(null);
+  const [imp, setImp] = useState({ High: true, Medium: true, Holiday: true });
+  const [msg, setMsg] = useState(null);
+  const day = (iso) => new Date(iso).toLocaleDateString("sv-SE");
+  useEffect(() => {
+    (async () => {
+      try {
+        if (Date.now() - Number(localStorage.getItem("pf_news_sync") || 0) > 6 * 36e5) {
+          const r = await fetch(`${SUPABASE_URL}/functions/v1/news`, { headers: PF_H });
+          if (r.ok) localStorage.setItem("pf_news_sync", String(Date.now()));
+        }
+      } catch {}
+      try {
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/news_events?select=*&currency=eq.USD&or=(impact.in.(High,Medium),and(impact.in.(Holiday,Low),title.ilike.*bank*holiday*))&order=event_time.asc&limit=5000`, { headers: PF_H });
+        if (!r.ok) throw 0;
+        setEv(await r.json());
+      } catch { setEv([]); setMsg("Tabelle news_events fehlt – news_setup.sql ausführen und Edge Function „news“ deployen."); }
+    })();
+  }, []);
+  const IMPC = { High: "#e0001a", Medium: "#ff9800", Holiday: "#888888" };
+  // Nur USD: Rot (High), Orange (Medium) und Grau (Holiday) nur wenn Bank Holiday
+  const cls = (e) => (e.impact === "Low" ? "Holiday" : e.impact);
+  const okCur = (e) => e.currency === "USD" && (cls(e) === "High" || cls(e) === "Medium" || (cls(e) === "Holiday" && /bank\s*holiday/i.test(e.title || "")));
+  const all = ev || [];
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const byDay = {};
+  all.filter((e) => okCur(e) && imp[cls(e)] && new Date(e.event_time) >= t0).slice(0, 80)
+    .forEach((e) => { const d = day(e.event_time); (byDay[d] = byDay[d] || []).push(e); });
+  const hi = new Set(all.filter((e) => e.impact === "High" && okCur(e)).map((e) => day(e.event_time)));
+  const from = all.length ? day(all[0].event_time) : null;
+  const tr = from ? (trades || []).filter((t) => t.trade_date >= from) : [];
+  const st = (l) => ({ n: l.length, pnl: l.reduce((s, t) => s + (t.pnl || 0), 0), win: l.length ? (l.filter((t) => (t.pnl || 0) > 0).length / l.length) * 100 : null });
+  const A = st(tr.filter((t) => hi.has(t.trade_date))), B = st(tr.filter((t) => !hi.has(t.trade_date)));
+  const usd = (n) => n.toLocaleString("de-DE", { style: "currency", currency: "USD" });
+  const lbl = { fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.14em", fontWeight: 700 };
+  const card = (title, s) => (
+    <div style={{ flex: 1, border: "1px solid var(--line)", borderRadius: "6px", padding: "12px", background: "var(--panel-2)", fontFamily: PF_MONO }}>
+      <div style={lbl}>{title}</div>
+      <div style={{ fontSize: "13px", marginTop: "6px" }}>{s.n} Trades</div>
+      <div style={{ fontSize: "13px", color: pfTone(s.pnl) }}>{usd(s.pnl)}</div>
+      <div style={{ fontSize: "12px", color: "var(--muted-light)" }}>Winrate {s.win == null ? "–" : s.win.toFixed(0) + " %"}</div>
+    </div>
+  );
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="panel" style={{ width: "760px", maxWidth: "97vw", maxHeight: "95vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div className="panel-head"><span>News</span><button type="button" className="icon-btn" onClick={onClose}><Icon.Close /></button></div>
+        {msg && <div className="notice notice-error">{msg}</div>}
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <div className="filter-group">{[["High", "Rot"], ["Medium", "Orange"], ["Holiday", "Grau"]].map(([k, l]) => <button key={k} type="button" className={`filter-chip ${imp[k] ? "active" : ""}`} style={{ color: imp[k] ? IMPC[k] : undefined }} onClick={() => setImp({ ...imp, [k]: !imp[k] })}>■ {l}</button>)}</div>
+        </div>
+        {ev === null && <div className="cal-loading">Lade…</div>}
+        {ev && !msg && Object.keys(byDay).length === 0 && <div className="cal-loading">Keine anstehenden Termine.</div>}
+        {Object.entries(byDay).map(([d, list]) => (
+          <div key={d}>
+            <div style={{ ...lbl, padding: "8px 0", borderBottom: "1px solid var(--line)" }}>{new Date(d + "T12:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" })}</div>
+            {list.map((e) => (
+              <div key={e.id} style={{ display: "grid", gridTemplateColumns: "54px 16px 1fr auto", gap: "10px", padding: "7px 0", fontSize: "12px", fontFamily: PF_MONO, alignItems: "center" }}>
+                <span style={{ color: "var(--muted-light)" }}>{new Date(e.event_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</span>
+                <span style={{ color: IMPC[cls(e)] || "#888", fontSize: "14px" }} title={e.impact}>■</span>
+                <span>{e.title}</span>
+                <span style={{ color: "var(--muted)" }}>Prog. {e.forecast || "–"} · Vorh. {e.previous || "–"}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+        <div style={{ ...lbl, borderTop: "1px solid var(--line)", paddingTop: "12px" }}>Deine Trades: News-Tage vs. andere Tage (USD, rote Termine{from ? `, seit ${from.split("-").reverse().join(".")}` : ""})</div>
+        {tr.length === 0 ? <div className="cal-loading">Noch keine Trades im erfassten Zeitraum.</div> : <div style={{ display: "flex", gap: "10px" }}>{card("News-Tage", A)}{card("Andere Tage", B)}</div>}
+      </div>
+    </div>
+  );
+}
+
+function PortfolioPanel({ onClose }) {
+  const [ok, setOk] = useState(() => { try { return sessionStorage.getItem("pf_ok") === "1"; } catch { return false; } });
+  const [hash, setHash] = useState(undefined);
+  const [pw, setPw] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [txs, setTxs] = useState(null);
+  const [quotes, setQuotes] = useState(null);
+  const [errs, setErrs] = useState([]);
+  const [rng, setRng] = useState("1M");
+  const [hov, setHov] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+  const [ko, setKo] = useState(() => { try { return localStorage.getItem("pf_ko_manual") || ""; } catch { return ""; } });
+  const [f, setF] = useState({ asset: "msci", side: "buy", tx_date: pfIso(new Date()), qty: "", price: "", fee: "0" });
+
+  useEffect(() => {
+    fetch(`${PF_SET}?key=eq.portfolio_pw&select=value`, { headers: PF_H })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => setHash(d[0] ? d[0].value : null))
+      .catch(() => setMsg("Settings-Tabelle nicht erreichbar."));
+  }, []);
+
+  const load = useCallback(async () => {
+    const e = [];
+    try {
+      const r = await fetch(`${PF_TX}?select=*&order=tx_date.asc,id.asc`, { headers: PF_H });
+      if (!r.ok) throw 0;
+      setTxs(await r.json());
+    } catch { e.push("Tabelle portfolio_tx fehlt – portfolio_setup.sql in Supabase ausführen."); setTxs([]); }
+    try {
+      const syms = [...new Set(Object.values(PF_ASSETS).map((a) => a.sym)), "EURUSD=X"].join(",");
+      const r = await fetch(`${SUPABASE_URL}/functions/v1/quotes?s=${encodeURIComponent(syms)}`, { headers: PF_H });
+      if (!r.ok) throw 0;
+      setQuotes(await r.json());
+    } catch { e.push("Kurs-Funktion „quotes“ nicht erreichbar – quotes.ts als Edge Function deployen."); setQuotes({}); }
+    setErrs(e);
+  }, []);
+  useEffect(() => { if (ok) load(); }, [ok, load]);
+
+  const c = useMemo(() => (txs && quotes ? pfCompute(txs, quotes, parseFloat(String(ko).replace(",", ".")) || null) : null), [txs, quotes, ko]);
+
+  const unlock = async (e) => {
+    e.preventDefault();
+    const h = await pfHash(pw);
+    if (hash === null) {
+      if (pw.length < 4) return setMsg("Mindestens 4 Zeichen.");
+      await fetch(`${PF_SET}?on_conflict=key`, { method: "POST", headers: { ...PF_H, Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ key: "portfolio_pw", value: h, updated_at: new Date().toISOString() }) });
+      setHash(h);
+    } else if (h !== hash) return setMsg("Falsches Passwort.");
+    try { sessionStorage.setItem("pf_ok", "1"); } catch {}
+    setPw(""); setMsg(null); setOk(true);
+  };
+  const lock = () => { try { sessionStorage.removeItem("pf_ok"); } catch {} setOk(false); onClose(); };
+  const num = (v) => parseFloat(String(v).replace(",", "."));
+  const add = async () => {
+    const qty = num(f.qty), price = num(f.price), fee = num(f.fee) || 0;
+    if (!(qty > 0) || !(price > 0)) return setMsg("Stückzahl und Preis eingeben.");
+    const r = await fetch(PF_TX, { method: "POST", headers: PF_H, body: JSON.stringify({ ...f, qty, price, fee }) });
+    if (!r.ok) return setMsg("Speichern fehlgeschlagen.");
+    setMsg(null); setF({ ...f, qty: "", price: "" }); load();
+  };
+  const del = async (id) => { if (!window.confirm("Diese Transaktion wirklich löschen?")) return; await fetch(`${PF_TX}?id=eq.${id}`, { method: "DELETE", headers: PF_H }); load(); };
+
+  const inp = { background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "6px", color: "var(--text)", padding: "9px 10px", fontSize: "13px", fontFamily: PF_MONO, minWidth: 0 };
+  const lbl = { fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.14em", fontWeight: 700 };
+
+  if (!ok) {
+    return (
+      <div className="overlay" onClick={onClose}>
+        <form className="panel" style={{ width: "360px", maxWidth: "95vw" }} onClick={(e) => e.stopPropagation()} onSubmit={unlock}>
+          <div className="panel-head"><span>Portfolio</span><button type="button" className="icon-btn" onClick={onClose}><Icon.Close /></button></div>
+          {hash === undefined && !msg ? <div className="cal-loading">Lade…</div> : (
+            <React.Fragment>
+              <div style={{ fontSize: "13px", color: "var(--muted-light)" }}>{hash === null ? "Neues Passwort für dein Portfolio festlegen:" : "Passwort eingeben:"}</div>
+              <input type="password" autoFocus style={inp} value={pw} onChange={(e) => setPw(e.target.value)} />
+              {msg && <div className="notice notice-error">{msg}</div>}
+              <button type="submit" className="btn-primary" disabled={hash === undefined}>{hash === null ? "Festlegen" : "Entsperren"}</button>
+            </React.Fragment>
+          )}
+        </form>
+      </div>
+    );
+  }
+
+  const first = c ? Math.max(0, c.series.findIndex((x) => x.v > 0)) : 0;
+  const n = { "1W": 7, "1M": 30, "3M": 90, "1J": 365, YTD: Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 864e5), Max: 9999 }[rng];
+  const chart = c ? c.series.slice(first).slice(-(n + 1)) : null;
+  const W = 700, H = 150;
+  let pts = null;
+  if (chart && chart.length > 1) {
+    const vs = chart.map((x) => x.v), lo = Math.min(...vs), hi = Math.max(...vs);
+    pts = chart.map((x, i) => [(i / (chart.length - 1)) * W, H - 8 - ((x.v - lo) / (hi - lo || 1)) * (H - 16)]);
+  }
+  const col = chart && chart.length > 1 && chart[chart.length - 1].v < chart[0].v ? "var(--red)" : "var(--green)";
+  const hp = hov != null && chart && chart[hov] ? chart[hov] : null;
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="panel" style={{ width: "900px", maxWidth: "97vw", maxHeight: "95vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div className="panel-head">
+          <span>Portfolio</span>
+          <span style={{ display: "flex", gap: "8px" }}>
+            <button type="button" className="btn-secondary" onClick={lock}>Sperren</button>
+            <button type="button" className="icon-btn" onClick={onClose}><Icon.Close /></button>
+          </span>
+        </div>
+        {errs.map((e) => <div key={e} className="notice notice-error">{e}</div>)}
+        {!c ? <div className="cal-loading">Lade…</div> : (
+          <React.Fragment>
+            <div>
+              <div style={lbl}>{hp ? hp.d.split("-").reverse().join(".") : "Gesamtwert"}</div>
+              <div style={{ fontSize: "38px", fontWeight: 700, fontFamily: PF_MONO }}>{pfEur(hp ? hp.v : c.now)}</div>
+            </div>
+            {pts && (
+              <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "150px", touchAction: "none" }}
+                onPointerMove={(e) => { const b = e.currentTarget.getBoundingClientRect(); setHov(Math.max(0, Math.min(chart.length - 1, Math.round(((e.clientX - b.left) / b.width) * (chart.length - 1))))); }}
+                onPointerLeave={() => setHov(null)}>
+                <polyline points={pts.map((p) => p.join(",")).join(" ")} fill="none" stroke={col} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+                {hp && <circle cx={pts[hov][0]} cy={pts[hov][1]} r="4" fill={col} />}
+              </svg>
+            )}
+            {!pts && <div className="cal-loading">Kein Verlauf möglich: {chart ? chart.length : 0} Datenpunkt(e), Gesamtwert {pfEur(c.now)}, {c.rows.length} Position(en).</div>}
+            <div className="filter-group" style={{ alignSelf: "flex-start" }}>
+              {["1W", "1M", "3M", "1J", "YTD", "Max"].map((r) => (
+                <button key={r} type="button" className={`filter-chip ${rng === r ? "active" : ""}`} onClick={() => setRng(r)}>{r}</button>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "8px" }}>
+              {c.perf.map((p) => (
+                <div key={p.label} style={{ border: "1px solid var(--line)", borderRadius: "6px", padding: "10px", background: "var(--panel-2)" }}>
+                  <div style={lbl}>{p.label}</div>
+                  <div style={{ color: pfTone(p.pnl), fontFamily: PF_MONO, fontSize: "13px", fontWeight: 700 }}>{pfPct(p.pct)}</div>
+                  <div style={{ color: pfTone(p.pnl), fontFamily: PF_MONO, fontSize: "11px" }}>{pfEur(p.pnl)}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ ...lbl, display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: "8px" }}>
+              <span>Assets</span><span style={{ textAlign: "right" }}>Wert</span><span style={{ textAlign: "right" }}>Heute</span><span style={{ textAlign: "right" }}>Gesamt</span>
+            </div>
+            {c.rows.length === 0 && <div className="cal-loading">Noch keine Positionen – unten die erste Transaktion eintragen.</div>}
+            {c.rows.map((r) => (
+              <div key={r.k} style={{ borderTop: "1px solid var(--line)", paddingTop: "10px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: "8px", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: "13px" }}>{r.a.name}</div>
+                    <div style={{ color: "var(--muted)", fontSize: "11px", fontFamily: PF_MONO }}>{r.qty.toLocaleString("de-DE", { maximumFractionDigits: 6 })} Stk. · Ø {pfEur(r.qty ? r.cost / r.qty : null)}</div>
+                  </div>
+                  <div style={{ textAlign: "right", fontFamily: PF_MONO, fontSize: "13px" }}>{pfEur(r.value)}</div>
+                  <div style={{ textAlign: "right", fontFamily: PF_MONO, fontSize: "12px", color: pfTone(r.day) }}>{pfPct(r.day)}</div>
+                  <div style={{ textAlign: "right", fontFamily: PF_MONO, fontSize: "12px", color: pfTone(r.gain) }}>{pfEur(r.gain)}<br />{pfPct(r.cost > 0 && r.gain != null ? (r.gain / r.cost) * 100 : null)}</div>
+                </div>
+                {r.a.ko && (
+                  <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", marginTop: "8px", fontSize: "11px", fontFamily: PF_MONO, color: "var(--muted-light)" }}>
+                    {c.ko && <span style={{ color: c.ko.dist < 5 ? "var(--red)" : undefined }}>{c.ko.dist <= 0 ? "KNOCK-OUT ERREICHT" : `KO-Abstand ${c.ko.dist.toFixed(1)} % · Hebel ${c.ko.lev.toFixed(1)}×`}</span>}
+                    <input style={{ ...inp, width: "130px", padding: "5px 8px" }} placeholder="Kurs € manuell" value={ko} onChange={(e) => { setKo(e.target.value); try { localStorage.setItem("pf_ko_manual", e.target.value); } catch {} }} />
+                  </div>
+                )}
+              </div>
+            ))}
+
+            <div style={{ ...lbl, borderTop: "1px solid var(--line)", paddingTop: "12px" }}>Transaktion eintragen</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "8px" }}>
+              <select style={inp} value={f.asset} onChange={(e) => setF({ ...f, asset: e.target.value })}>{Object.entries(PF_ASSETS).map(([k, a]) => <option key={k} value={k}>{a.name}</option>)}</select>
+              <select style={inp} value={f.side} onChange={(e) => setF({ ...f, side: e.target.value })}><option value="buy">Kauf</option><option value="sell">Verkauf</option></select>
+              <input type="date" style={inp} value={f.tx_date} onChange={(e) => setF({ ...f, tx_date: e.target.value })} />
+              <input style={inp} placeholder="Stück" value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} />
+              <input style={inp} placeholder="Preis € / Stück" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} />
+              <input style={inp} placeholder="Gebühr €" value={f.fee} onChange={(e) => setF({ ...f, fee: e.target.value })} />
+            </div>
+            {msg && <div className="notice notice-error">{msg}</div>}
+            <button type="button" className="btn-primary" onClick={add}>Hinzufügen</button>
+            {txs.length > 8 && <button type="button" className="btn-secondary" onClick={() => setShowAll(!showAll)}>{showAll ? "Weniger anzeigen" : `Alle ${txs.length} Transaktionen anzeigen`}</button>}
+            {(showAll ? txs : txs.slice(-8)).slice().reverse().map((t) => (
+              <div key={t.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontFamily: PF_MONO, color: "var(--muted-light)" }}>
+                <span>{t.tx_date} · {t.side === "buy" ? "Kauf" : "Verkauf"} {t.qty} × {PF_ASSETS[t.asset] ? PF_ASSETS[t.asset].name : t.asset} @ {pfEur(t.price)}</span>
+                <button type="button" className="icon-btn" onClick={() => del(t.id)} aria-label="Löschen">×</button>
+              </div>
+            ))}
+          </React.Fragment>
+        )}
+      </div>
+    </div>
   );
 }
 
