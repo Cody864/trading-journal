@@ -117,6 +117,8 @@
     text-align: left; cursor: default; font-family: inherit; color: var(--text);
   }
   .cal-cell-empty { background: transparent; border: none; }
+  .cal-cell { position: relative; }
+  .cal-note-dot { position: absolute; top: 8px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--muted-light); }
   .cal-daynum { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
   .cal-pnl { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; margin-top: auto; }
   .cal-count { font-size: 11px; color: var(--muted); }
@@ -313,7 +315,11 @@
   .overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.82); backdrop-filter: blur(4px);
     display: flex; justify-content: center; align-items: center; z-index: 50; padding: 24px;
+    overscroll-behavior: contain;
   }
+  .panel { overscroll-behavior: contain; }
+  /* Popup offen → Hintergrund nicht scrollbar */
+  html.modal-open, html.modal-open body { overflow: hidden !important; }
   .panel {
     background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
     box-shadow: 0 24px 64px rgba(0,0,0,0.8);
@@ -432,6 +438,7 @@
 
   /* ── Day Detail ── */
   .daydetail { width: 480px; }
+  .daydetail-note { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
   .daydetail-summary { display: flex; align-items: baseline; gap: 12px; font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; }
   .daydetail-summary .pos { color: var(--text); }
   .daydetail-summary .neg { color: var(--red); }
@@ -906,6 +913,23 @@
   ::selection { background: rgba(var(--win-rgb),0.3); }
   * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent; }
   /* ═══════════════ END MODERN REFRESH 5 ═══════════════ */
+
+  /* ═══════════════ CLASSIC GREEN (normaleres Gruen) ═══════════════
+     Gewinn-Gruen zentral: --win / --win-rgb. Zum Zuruecksetzen alles bis "END CLASSIC GREEN" loeschen. */
+  :root { --win: #4caf50; --win-rgb: 76,175,80; }
+  .risk-fill.target.passed { background: var(--win); }
+  .btn-secondary.active { background: rgba(var(--win-rgb),0.14); border-color: var(--win); color: var(--win); }
+  .payout-banner { background: rgba(var(--win-rgb),0.07); border-color: rgba(var(--win-rgb),0.3); border-left-color: var(--win); color: var(--win); }
+  .funded-banner { background: rgba(var(--win-rgb),0.05); border-color: rgba(var(--win-rgb),0.25); border-left-color: var(--win); color: var(--win); }
+  .funded-banner-dot { background: var(--win); box-shadow: 0 0 8px rgba(var(--win-rgb),0.7); }
+  .payout-status-dot.ok { background: var(--win); box-shadow: 0 0 8px rgba(var(--win-rgb),0.6); }
+  .payout-day-pip.hit { background: rgba(var(--win-rgb),0.15); border-color: var(--win); color: var(--win); }
+  .confluence-chip.active { background: rgba(var(--win-rgb),0.12); border-color: var(--win); color: var(--win); }
+  .confluence-chip.implied { border-color: rgba(var(--win-rgb),0.5); color: var(--win); background: rgba(var(--win-rgb),0.04); }
+  .confluence-chip-sm { background: rgba(var(--win-rgb),0.08); border-color: rgba(var(--win-rgb),0.25); color: var(--win); }
+  .acct-tag.xfa { color: var(--win); border-color: rgba(var(--win-rgb),0.45); }
+  .btn-secondary.active:hover { background: rgba(var(--win-rgb),0.22); border-color: var(--win); }
+  /* ═══════════════ END CLASSIC GREEN ═══════════════ */
 </style>
 </head>
 <body>
@@ -937,6 +961,7 @@ const PROFILES = [
   {
     id: "cody",
     name: "Cody",
+    lock: true, // Passwortsperre vor dem Öffnen des Profils (Hash in der Settings-Tabelle, Key profile_pw_cody)
     url: "https://pjywivxovkjkzydmjftp.supabase.co",
     key: "sb_publishable_xwsKMkeuBJmza9u9W24AIw_dQMEb14r",
     fundedBalanceOverride: 48224,
@@ -962,10 +987,15 @@ const PROFILES = [
   },
 ];
 const PROFILE_LS_KEY = "journal_profile";
+const PROF_OK_KEY = "journal_profile_ok";
 const ACTIVE_PROFILE = (() => {
   try {
     const id = localStorage.getItem(PROFILE_LS_KEY);
-    return PROFILES.find((p) => p.id === id) || null;
+    const p = PROFILES.find((x) => x.id === id) || null;
+    // Gesperrte Profile (lock: true) sind erst nach der Passwortabfrage in dieser Browser-Sitzung aktiv,
+    // vorher erscheint die Profilauswahl.
+    if (p && p.lock && sessionStorage.getItem(`${PROF_OK_KEY}__${p.id}`) !== "1") return null;
+    return p;
   } catch { return null; }
 })();
 /* ── Accounts ──
@@ -1487,7 +1517,7 @@ function computeTrade({ symbol, contracts, stop_loss, take_profit, result }) {
   //         (ein Trade, der für 30RR geplant war aber in den SL läuft, zählt als -1RR, nicht -30RR)
   let realized_rr = null;
   if (result === "win") realized_rr = rr;
-  else if (result === "loss") realized_rr = rr !== null ? -1 : null;
+  else if (result === "loss") realized_rr = risk_amount !== null ? -1 : null; // Loss ist immer -1R, TP wird nicht gebraucht
   else if (result === "be") realized_rr = 0;
 
   return { risk_amount, reward_amount, rr, realized_rr, pnl };
@@ -1699,7 +1729,10 @@ function computeEdgeStats(list) {
   const avgWin = mean(winPnl);
   const avgLoss = mean(lossPnl); // negativ
   const payoff = avgLoss < 0 ? avgWin / Math.abs(avgLoss) : avgWin > 0 ? Infinity : 0;
-  const winrate = decided ? wins.length / decided : 0;
+  // Trades ohne Plan (plan_followed === false) zaehlen nicht in die Winrate
+  const wrWins = wins.filter((t) => t.plan_followed !== false).length;
+  const wrLosses = losses.filter((t) => t.plan_followed !== false).length;
+  const winrate = wrWins + wrLosses ? wrWins / (wrWins + wrLosses) : 0;
   const rs = finiteNums(list.map(tradeRR));
   const expR = mean(rs);
   const sdR = stdev(rs);
@@ -1746,12 +1779,12 @@ function rDistribution(list) {
 
 // Verhaltensanalyse: wie verhaelt sich das Ergebnis nach Gewinn/Verlust, nach Tagesanzahl, nach Uhrzeit?
 function behaviorStats(list) {
-  const mk = () => ({ n: 0, wins: 0, losses: 0, pnl: 0, noPlan: 0, planKnown: 0 });
+  const mk = () => ({ n: 0, wins: 0, losses: 0, wrW: 0, wrL: 0, pnl: 0, noPlan: 0, planKnown: 0 });
   const add = (g, t) => {
     g.n += 1;
     g.pnl += Number(t.pnl || 0);
-    if (t.result === "win") g.wins += 1;
-    else if (t.result === "loss") g.losses += 1;
+    if (t.result === "win") { g.wins += 1; if (t.plan_followed !== false) g.wrW += 1; }
+    else if (t.result === "loss") { g.losses += 1; if (t.plan_followed !== false) g.wrL += 1; }
     if (t.plan_followed === true || t.plan_followed === false) {
       g.planKnown += 1;
       if (t.plan_followed === false) g.noPlan += 1;
@@ -1759,7 +1792,7 @@ function behaviorStats(list) {
   };
   const fin = (g) => {
     const d = g.wins + g.losses;
-    return { ...g, winrate: d ? g.wins / d : 0, avgPnl: g.n ? g.pnl / g.n : 0, noPlanShare: g.planKnown ? g.noPlan / g.planKnown : 0 };
+    return { ...g, winrate: g.wrW + g.wrL ? g.wrW / (g.wrW + g.wrL) : 0, avgPnl: g.n ? g.pnl / g.n : 0, noPlanShare: g.planKnown ? g.noPlan / g.planKnown : 0 };
   };
   const first = mk(), afterWin = mk(), afterLoss = mk(), bigger = mk(), notBigger = mk();
   const byDay = new Map();
@@ -1895,7 +1928,7 @@ function periodReport(list, by = "month") {
       return {
         key, n: arr.length, wins: wins.length, losses: losses.length,
         pnl: arr.reduce((s, t) => s + Number(t.pnl || 0), 0),
-        winrate: decided ? (wins.length / decided) * 100 : 0,
+        winrate: (() => { const w = wins.filter((t) => t.plan_followed !== false).length, l = losses.filter((t) => t.plan_followed !== false).length; return w + l ? (w / (w + l)) * 100 : 0; })(),
         pf: gl > 0 ? gp / gl : gp > 0 ? Infinity : 0,
         avgR: mean(rs),
         days: dayVals.length, greenDays: dayVals.filter((v) => v > 0).length,
@@ -1930,6 +1963,7 @@ function TradingJournal() {
   const [error, setError] = useState(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [forwardTestOpen, setForwardTestOpen] = useState(false);
+  const [backtestOpen, setBacktestOpen] = useState(false);
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [pfOpen, setPfOpen] = useState(false); // PORTFOLIO
   const [newsOpen, setNewsOpen] = useState(false); // NEWS
@@ -1939,6 +1973,19 @@ function TradingJournal() {
     return { year: n.getFullYear(), month: n.getMonth() };
   });
   const [dayDetail, setDayDetail] = useState(null);
+  // Tagesnotizen: werden im Tag-Fenster (Klick auf einen Kalendertag) bearbeitet.
+  const [dayNotes, setDayNotes] = useState(loadDayNotes);
+  const hasDayNote = (iso) => typeof dayNotes[iso] === "string" && dayNotes[iso].trim() !== "";
+  const saveDayNote = useCallback((d, text) => {
+    const next = { ...loadDayNotes() };
+    if (text.trim()) next[d] = text; else delete next[d];
+    try { localStorage.setItem(NOTES_LS_KEY, JSON.stringify(next)); } catch {}
+    setDayNotes(next);
+  }, []);
+  // Nach dem Sync mit der Datenbank die Notizen neu laden.
+  useEffect(() => {
+    Promise.resolve(window.__settingsReady).then(() => setDayNotes(loadDayNotes()));
+  }, []);
   const [editingTrade, setEditingTrade] = useState(null);
   const [filterSymbol, setFilterSymbol] = useState("all");
   const [filterResult, setFilterResult] = useState("all");
@@ -2164,7 +2211,8 @@ function TradingJournal() {
 
   const filteredTrades = useMemo(() => {
     return trades.filter((t) => {
-      if (filterSymbol !== "all" && t.symbol !== filterSymbol) return false;
+      // Symbol-Filter arbeitet auf Asset-Ebene: NQ = NQ + MNQ, ES = ES + MES, GC = GC + MGC
+      if (filterSymbol !== "all" && marketOf(t.symbol) !== marketOf(filterSymbol)) return false;
       if (filterResult !== "all" && t.result !== filterResult) return false;
       return true;
     });
@@ -2209,7 +2257,7 @@ function TradingJournal() {
   const realizedRRForTrade = useCallback((t) => {
     if (t.result === "be") return 0;
     if (t.realized_rr !== null && t.realized_rr !== undefined) return Number(t.realized_rr);
-    if (t.result === "loss") return t.rr !== null && t.rr !== undefined ? -1 : null;
+    if (t.result === "loss") return -1;
     if (t.result === "win") return t.rr !== null && t.rr !== undefined ? Number(t.rr) : null;
     return null;
   }, []);
@@ -2384,7 +2432,10 @@ function TradingJournal() {
     const losses = statsTrades.filter((t) => t.result === "loss" || (t.result !== "win" && t.result !== "be" && Number(t.pnl) < 0));
     const bes = statsTrades.filter((t) => t.result === "be");
     const decidedTrades = statsTrades.filter((t) => t.result !== "be");
-    const winrate = decidedTrades.length ? (wins.length / decidedTrades.length) * 100 : 0;
+    // Trades ohne Plan (plan_followed === false) zaehlen NICHT in die Winrate; PnL/Profit Factor bleiben unveraendert
+    const wrDecided = decidedTrades.filter((t) => t.plan_followed !== false);
+    const wrWins = wins.filter((t) => t.plan_followed !== false);
+    const winrate = wrDecided.length ? (wrWins.length / wrDecided.length) * 100 : 0;
 
     const grossProfit = wins.reduce((s, t) => s + Number(t.pnl), 0);
     const grossLoss = Math.abs(losses.reduce((s, t) => s + Number(t.pnl), 0));
@@ -2395,7 +2446,7 @@ function TradingJournal() {
       .map((t) => {
         if (t.result === "be") return 0;
         if (t.realized_rr !== null && t.realized_rr !== undefined) return Number(t.realized_rr);
-        if (t.result === "loss") return t.rr !== null && t.rr !== undefined ? -1 : null;
+        if (t.result === "loss") return -1;
         if (t.result === "win") return t.rr !== null && t.rr !== undefined ? Number(t.rr) : null;
         return null;
       })
@@ -2500,7 +2551,7 @@ function TradingJournal() {
     // Breakdown nach Symbol
     const bySymbol = {};
     statsTrades.forEach((t) => {
-      const key = t.symbol || "—";
+      const key = t.symbol ? marketOf(t.symbol) : "—";
       if (!bySymbol[key]) bySymbol[key] = { pnl: 0, count: 0 };
       bySymbol[key].pnl += Number(t.pnl || 0);
       bySymbol[key].count += 1;
@@ -3099,10 +3150,10 @@ notify pgrst, 'reload schema';`;
   const isCurrentMonthNow = cursor.year === today.getFullYear() && cursor.month === today.getMonth();
 
   useEffect(() => {
-    if (dayDetailData && dayDetailData.trades.length === 0) {
+    if (dayDetailData && dayDetailData.trades.length === 0 && !hasDayNote(dayDetailData.iso)) {
       setDayDetail(null);
     }
-  }, [dayDetailData]);
+  }, [dayDetailData, dayNotes]);
 
   // ── Tastatur-Shortcuts: N = neuer Trade, Esc = Modal schließen ──
   useEffect(() => {
@@ -3170,6 +3221,9 @@ notify pgrst, 'reload schema';`;
           )}
           <button className="btn-secondary" onClick={() => setForwardTestOpen(true)}>
             Forward Test
+          </button>
+          <button className="btn-secondary" onClick={() => setBacktestOpen(true)}>
+            Backtest
           </button>
           <button className="btn-primary" onClick={() => setPanelOpen(true)}>
             <Icon.Plus /> {T("Trade hinzufügen", "Add trade")} <span className="kbd-hint">N</span>
@@ -3294,21 +3348,6 @@ notify pgrst, 'reload schema';`;
 
       {!evalPassed ? (
         <div className="risk-row">
-          <div className="risk-card">
-            <div className="risk-head">
-              <span className="risk-label">{T("Drawdown (EOD, Trailing)", "Drawdown (EOD, trailing)")}</span>
-              <span className={`risk-value ${accountStats.ddBufferRemaining < EVAL_DD_BUFFER ? "warn" : "pos"}`}>
-                {fmtMoneyShort(-Math.max(0, accountStats.eodPeak - accountStats.balance))}
-              </span>
-            </div>
-            <div className="risk-track">
-              <div className="risk-fill dd" style={{ width: `${accountStats.ddRiskPct}%` }} />
-            </div>
-            <div className="risk-meta">
-              <span>MLL: {fmtMoney(accountStats.mll)} {T(`(trailing, ${usd0(EVAL_DD_BUFFER)} Abstand)`, `(trailing, ${usd0(EVAL_DD_BUFFER)} distance)`)}</span>
-              <span>{T("Puffer zur MLL:", "Buffer to MLL:")} {fmtMoneyShort(accountStats.ddBufferRemaining)}</span>
-            </div>
-          </div>
           <div className="risk-card" style={{ gridColumn: "1 / -1" }}>
             <div className="risk-head">
               <span className="risk-label">{T("Fortschritt zur Funded Stage", "Progress to funded stage")}</span>
@@ -3328,7 +3367,7 @@ notify pgrst, 'reload schema';`;
               const startMarkerPct = Math.max(0, Math.min(100, ((STARTING_BALANCE - scaleLeft) / scaleRange) * 100));
               const passed = accountStats.accountPassed;
               // Farbe: rot wenn unter 50k, weiss wenn normal, gruen wenn passed
-              const fillColor = accountStats.balance < STARTING_BALANCE ? "var(--red)" : passed ? "#2ecc71" : "var(--text)";
+              const fillColor = accountStats.balance < STARTING_BALANCE ? "var(--red)" : passed ? "var(--win)" : "var(--text)";
               return (
                 <div style={{ position: "relative", marginTop: "6px" }}>
                   {/* Track */}
@@ -3362,7 +3401,7 @@ notify pgrst, 'reload schema';`;
                     {startMarkerPct > 0.5 && (
                       <span style={{ position: "absolute", left: `${startMarkerPct}%`, transform: "translateX(-50%)", color: "var(--muted-light)" }}>{fmtMoney(STARTING_BALANCE)}</span>
                     )}
-                    <span style={{ position: "absolute", right: 0, color: passed ? "#2ecc71" : "var(--muted-light)" }}>{fmtMoney(ACCOUNT_PASS_TARGET)} ✓</span>
+                    <span style={{ position: "absolute", right: 0, color: passed ? "var(--win)" : "var(--muted-light)" }}>{fmtMoney(ACCOUNT_PASS_TARGET)} ✓</span>
                   </div>
                 </div>
               );
@@ -3450,7 +3489,7 @@ notify pgrst, 'reload schema';`;
           >
             {T("Alle Symbole", "All symbols")}
           </button>
-          {Object.keys(SYMBOLS).map((key) => (
+          {Object.keys(MARKETS).map((key) => (
             <button
               key={key}
               className={`filter-chip ${filterSymbol === key ? "active" : ""}`}
@@ -3517,12 +3556,12 @@ notify pgrst, 'reload schema';`;
           <div className="insight-item">
             <span className="insight-label">{T("Bester Trade", "Best trade")}</span>
             <span className="insight-value pos">{stats.bestTrade ? fmtMoneyShort(Number(stats.bestTrade.pnl)) : "—"}</span>
-            <span className="insight-sub">{stats.bestTrade ? `${stats.bestTrade.symbol} · ${stats.bestTrade.trade_date}` : "—"}</span>
+            <span className="insight-sub">{stats.bestTrade ? `${stats.bestTrade.symbol ? marketOf(stats.bestTrade.symbol) : ""} · ${stats.bestTrade.trade_date}` : "—"}</span>
           </div>
           <div className="insight-item">
             <span className="insight-label">{T("Schlechtester Trade", "Worst trade")}</span>
             <span className="insight-value neg">{stats.worstTrade ? fmtMoneyShort(Number(stats.worstTrade.pnl)) : "—"}</span>
-            <span className="insight-sub">{stats.worstTrade ? `${stats.worstTrade.symbol} · ${stats.worstTrade.trade_date}` : "—"}</span>
+            <span className="insight-sub">{stats.worstTrade ? `${stats.worstTrade.symbol ? marketOf(stats.worstTrade.symbol) : ""} · ${stats.worstTrade.trade_date}` : "—"}</span>
           </div>
         </div>
 
@@ -3573,7 +3612,7 @@ notify pgrst, 'reload schema';`;
           <React.Fragment>
             <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 1fr", gap: "10px 18px", alignItems: "center" }}>
               <span />
-              <b style={{ color: "#2ecc71", fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{T("Mit Plan", "With plan")}</b>
+              <b style={{ color: "var(--win)", fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{T("Mit Plan", "With plan")}</b>
               <b style={{ color: "#ff6b78", fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{T("Ohne Plan", "Without plan")}</b>
               {[
                 ["Trades", (g) => String(g.count)],
@@ -3616,6 +3655,14 @@ notify pgrst, 'reload schema';`;
             <span className="cal-year">{cursor.year}</span>
           </div>
           <div className="cal-nav">
+            <div className="filter-group">
+              <button type="button" className={`filter-chip ${scopeMode === "current" ? "active" : ""}`} onClick={() => setScopeMode("current")}>
+                {T("Aktueller Account", "Current account")}
+              </button>
+              <button type="button" className={`filter-chip ${scopeMode === "all" ? "active" : ""}`} onClick={() => setScopeMode("all")}>
+                {T("All time", "All time")}{otherTradeCount > 0 ? ` (+${otherTradeCount})` : ""}
+              </button>
+            </div>
             <span className={`cal-month-pnl ${calendar.monthTotal >= 0 ? "pos" : "neg"}`}>
               {fmtMoneyShort(calendar.monthTotal)} · {calendar.monthTradeCount} Trades
             </span>
@@ -3667,15 +3714,17 @@ notify pgrst, 'reload schema';`;
                 if (!cell) return <div className="cal-cell cal-cell-empty" key={ci} />;
                 const isToday = isCurrentMonthNow && cell.day === today.getDate();
                 const hasTrades = cell.trades.length > 0;
+                const hasNote = hasDayNote(cell.iso);
                 const displayPnl = cell.isHistoric ? cell.rawPnl : cell.pnl;
                 return (
                   <button
                     key={ci}
                     className={`cal-cell ${hasTrades ? (displayPnl >= 0 ? "cal-win" : "cal-loss") : ""} ${isToday ? "cal-today" : ""} ${cell.isHistoric ? "cal-cell-historic" : ""} ${cell.isOther ? "cal-cell-other" : ""} ${ci >= 5 ? "cal-cell-weekend" : ""}`}
-                    onClick={() => hasTrades && setDayDetail(cell.iso)}
-                    disabled={!hasTrades}
+                    onClick={() => (hasTrades || hasNote) && setDayDetail(cell.iso)}
+                    disabled={!hasTrades && !hasNote}
                   >
                     <span className="cal-daynum">{cell.day}</span>
+                    {hasNote && <span className="cal-note-dot" title={T("Notiz vorhanden", "Has a note")} />}
                     {hasTrades && (
                       <React.Fragment>
                         <span className="cal-pnl">{fmtMoneyShort(displayPnl)}</span>
@@ -3701,8 +3750,6 @@ notify pgrst, 'reload schema';`;
           })
         )}
       </section>
-
-      <DailyNotes trades={allTrades} />
 
       {panelOpen && (
         <AddTradePanel
@@ -3744,6 +3791,10 @@ notify pgrst, 'reload schema';`;
         <FriendsPanel onClose={() => setFriendsOpen(false)} myTrades={trades} />
       )}
 
+      {backtestOpen && (
+        <BacktestPanel onClose={() => setBacktestOpen(false)} existingSetups={existingSetups} />
+      )}
+
       {forwardTestOpen && (
         <ForwardTestPanel
           onClose={() => setForwardTestOpen(false)}
@@ -3754,9 +3805,11 @@ notify pgrst, 'reload schema';`;
         />
       )}
 
-      {dayDetailData && dayDetailData.trades.length > 0 && (
+      {dayDetailData && (dayDetailData.trades.length > 0 || hasDayNote(dayDetailData.iso)) && (
         <DayDetailModal
           day={dayDetailData}
+          note={dayNotes[dayDetailData.iso] || ""}
+          onSaveNote={saveDayNote}
           onClose={() => setDayDetail(null)}
           onDelete={handleDeleteTrade}
           onEdit={(trade) => { setDayDetail(null); setEditingTrade(trade); }}
@@ -4001,51 +4054,30 @@ const loadDayNotes = () => {
     return o && typeof o === "object" && !Array.isArray(o) ? o : {};
   } catch { return {}; }
 };
-const fmtNoteDate = (k) => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(k || "");
-  if (!m) return k;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(LOCALE, { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
-};
-
-// Tagesnotizen: optionaler Kurz-Recap pro Tag. Liegt im Browser und wird (wie Konten und Payouts) ueber die
-// Settings-Tabelle in Supabase gesichert, sofern es diese Tabelle gibt.
-function DailyNotes({ trades }) {
-  const [notes, setNotes] = useState(loadDayNotes);
-  const [date, setDate] = useState(() => localDateStr());
-  const [draft, setDraft] = useState(() => loadDayNotes()[localDateStr()] || "");
+// Tagesnotiz: optionaler Kurz-Recap pro Tag, wird im Tag-Fenster (Klick auf einen Kalendertag) bearbeitet.
+// Liegt im Browser und wird (wie Konten und Payouts) ueber die Settings-Tabelle in Supabase gesichert, sofern es diese Tabelle gibt.
+function DayNote({ date, note, onSave }) {
+  const [draft, setDraft] = useState(note || "");
   const [saved, setSaved] = useState(true);
-  const [showAll, setShowAll] = useState(false);
   const timer = React.useRef(null);
-  const touched = React.useRef(false);
   const pending = React.useRef(null);
-  const dateRef = React.useRef(date);
-  dateRef.current = date;
+  const touched = React.useRef(false);
+  const onSaveRef = React.useRef(onSave);
+  onSaveRef.current = onSave;
 
-  const persist = useCallback((d, text) => {
-    const next = { ...loadDayNotes() };
-    if (text.trim()) next[d] = text; else delete next[d];
-    try { localStorage.setItem(NOTES_LS_KEY, JSON.stringify(next)); } catch {}
-    setNotes(next);
-  }, []);
   const flush = useCallback(() => {
     clearTimeout(timer.current);
-    if (pending.current) {
-      persist(pending.current.date, pending.current.text);
+    if (pending.current !== null) {
+      const text = pending.current;
       pending.current = null;
+      onSaveRef.current(date, text);
       setSaved(true);
     }
-  }, [persist]);
+  }, [date]);
 
-  // Nach dem Sync mit der Datenbank neu laden, aber nur wenn noch nichts getippt wurde.
-  useEffect(() => {
-    Promise.resolve(window.__settingsReady).then(() => {
-      if (touched.current) return;
-      const fresh = loadDayNotes();
-      setNotes(fresh);
-      setDraft(fresh[dateRef.current] || "");
-    });
-  }, []);
-  // Beim Verlassen der Seite oder des Tabs sofort speichern.
+  // Notiz nach dem Sync mit der Datenbank uebernehmen, solange noch nichts getippt wurde.
+  useEffect(() => { if (!touched.current) setDraft(note || ""); }, [note]);
+  // Beim Schliessen des Fensters oder Verlassen der Seite sofort speichern.
   useEffect(() => {
     window.addEventListener("pagehide", flush);
     return () => { window.removeEventListener("pagehide", flush); flush(); };
@@ -4056,46 +4088,14 @@ function DailyNotes({ trades }) {
     touched.current = true;
     setDraft(text);
     setSaved(false);
-    pending.current = { date, text };
+    pending.current = text;
     clearTimeout(timer.current);
     timer.current = setTimeout(flush, 700);
   };
-  const changeDate = (d) => {
-    if (!d) return;
-    flush();
-    setDate(d);
-    setDraft(loadDayNotes()[d] || "");
-  };
-
-  const byDay = useMemo(() => {
-    const m = new Map();
-    trades.forEach((t) => {
-      if (!t.trade_date) return;
-      const g = m.get(t.trade_date) || { n: 0, pnl: 0 };
-      g.n += 1;
-      g.pnl += Number(t.pnl || 0);
-      m.set(t.trade_date, g);
-    });
-    return m;
-  }, [trades]);
-  const day = byDay.get(date);
-  const keys = Object.keys(notes).filter((k) => typeof notes[k] === "string" && notes[k].trim()).sort().reverse();
-  const listed = showAll ? keys : keys.slice(0, 5);
 
   return (
-    <section className="notes-card">
-      <div className="notes-head">
-        <span className="notes-title">{T("Tagesnotizen", "Daily notes")}</span>
-        <input type="date" className="notes-date" value={date} max={localDateStr()} onChange={(e) => changeDate(e.target.value)} />
-      </div>
-      <span className="notes-meta">
-        {day ? (
-          <>
-            {T(`${day.n} Trade${day.n === 1 ? "" : "s"} an diesem Tag · `, `${day.n} trade${day.n === 1 ? "" : "s"} that day · `)}
-            <span className={`notes-pnl ${toneOf(day.pnl)}`}>{fmtMoneyShort(day.pnl)}</span>
-          </>
-        ) : T("Keine Trades an diesem Tag", "No trades that day")}
-      </span>
+    <div className="daydetail-note">
+      <span className="notes-title">{T("Tagesnotiz", "Daily note")}</span>
       <textarea
         className="notes-area"
         value={draft}
@@ -4106,31 +4106,7 @@ function DailyNotes({ trades }) {
       <span className="notes-foot">
         {!saved ? T("Speichert …", "Saving …") : draft.trim() ? T("Gespeichert", "Saved") : T("Optional, nur wenn du magst", "Optional, only if you like")}
       </span>
-      {keys.length > 0 && (
-        <>
-          <div className="insights-col-title" style={{ marginTop: 6, marginBottom: 0 }}>{T("Letzte Notizen", "Recent notes")}</div>
-          <div className="notes-list">
-            {listed.map((k) => {
-              const g = byDay.get(k);
-              return (
-                <button type="button" key={k} className={`notes-item ${k === date ? "active" : ""}`} onClick={() => changeDate(k)}>
-                  <span className="notes-item-head">
-                    <span>{fmtNoteDate(k)}</span>
-                    {g && <span className={`notes-pnl ${toneOf(g.pnl)}`}>{g.n}× · {fmtMoneyShort(g.pnl)}</span>}
-                  </span>
-                  <span className="notes-item-text">{notes[k]}</span>
-                </button>
-              );
-            })}
-          </div>
-          {keys.length > 5 && (
-            <button type="button" className="brief-toggle" onClick={() => setShowAll((v) => !v)}>
-              {showAll ? T("Weniger anzeigen", "Show less") : T(`Alle anzeigen (${keys.length})`, `Show all (${keys.length})`)}
-            </button>
-          )}
-        </>
-      )}
-    </section>
+    </div>
   );
 }
 
@@ -4782,7 +4758,10 @@ function validateTradeForm(f, today = localIsoToday()) {
   const sl = num(f.stop_loss);
   if (!Number.isFinite(sl) || sl === 0) err.stop_loss = T("Stop Loss in Punkten, nicht 0", "Stop loss in points, not 0");
   const tp = num(f.take_profit);
-  if (!Number.isFinite(tp) || tp === 0) err.take_profit = T("Take Profit in Punkten, nicht 0", "Take profit in points, not 0");
+  // Take Profit ist bei Losses optional (Loss = immer -1R, der TP spielt keine Rolle)
+  const tpEmpty = f.take_profit === "" || f.take_profit === null || f.take_profit === undefined;
+  if (f.result === "loss" && tpEmpty) { /* ok */ }
+  else if (!Number.isFinite(tp) || tp === 0) err.take_profit = T("Take Profit in Punkten, nicht 0", "Take profit in points, not 0");
   if (f.manual_pnl !== "") {
     const p = num(f.manual_pnl);
     if (!Number.isFinite(p)) err.manual_pnl = T("Keine gültige Zahl", "Not a valid number");
@@ -4928,7 +4907,7 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
     direction: form.direction,
     result: form.result,
     stop_loss: Number(form.stop_loss),
-    take_profit: Number(form.take_profit),
+    take_profit: form.take_profit === "" ? null : Number(form.take_profit),
     rr: computed.rr,
     realized_rr: computed.realized_rr,
     risk_amount: computed.risk_amount,
@@ -5219,7 +5198,7 @@ function AddTradePanel({ onClose, onSubmit, saving, initialTrade = null, isEdit 
   );
 }
 
-function DayDetailModal({ day, onClose, onDelete, onEdit }) {
+function DayDetailModal({ day, note, onSaveNote, onClose, onDelete, onEdit }) {
   return (
     <div className="overlay" onClick={onClose}>
       <div className="panel daydetail" onClick={(e) => e.stopPropagation()}>
@@ -5229,17 +5208,20 @@ function DayDetailModal({ day, onClose, onDelete, onEdit }) {
             <Icon.Close />
           </button>
         </div>
-        <div className="daydetail-summary">
-          <span className={day.pnl >= 0 ? "pos" : "neg"} style={day.isHistoric ? { opacity: 0.5, textDecoration: "line-through" } : {}}>
-            {fmtMoney(day.pnl)}
-          </span>
-          <span className="muted">{day.trades.length} Trade{day.trades.length > 1 ? "s" : ""}</span>
-        </div>
+        {day.trades.length > 0 && (
+          <div className="daydetail-summary">
+            <span className={day.pnl >= 0 ? "pos" : "neg"} style={day.isHistoric ? { opacity: 0.5, textDecoration: "line-through" } : {}}>
+              {fmtMoney(day.pnl)}
+            </span>
+            <span className="muted">{day.trades.length} Trade{day.trades.length > 1 ? "s" : ""}</span>
+          </div>
+        )}
         <div className="trade-list">
           {day.trades.map((t) => (
             <TradeRow key={t.id} trade={t} onDelete={onDelete} onEdit={onEdit} />
           ))}
         </div>
+        <DayNote key={day.iso} date={day.iso} note={note} onSave={onSaveNote} />
       </div>
     </div>
   );
@@ -5311,10 +5293,355 @@ function TradeRow({ trade, onDelete, onEdit }) {
                 <Icon.Close />
               </button>
             </div>
-            <img className="shot-overlay-img" src={trade.screenshot} alt="Trade Screenshot" />
+            <ShotImage src={trade.screenshot} />
           </div>
         </div>
       )}
+    </React.Fragment>
+  );
+}
+
+/* Screenshot-Ansicht: Klick auf das Bild öffnet eine Vollbild-Version. Schließen per Klick, X oder Esc. */
+function ShotImage({ src }) {
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setFull(false); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [full]);
+  return (
+    <React.Fragment>
+      <img className="shot-overlay-img" src={src} alt="Trade Screenshot" style={{ cursor: "zoom-in" }} onClick={() => setFull(true)} />
+      {full && ReactDOM.createPortal(
+        <div className="overlay" style={{ zIndex: 100, padding: 0, background: "rgba(0,0,0,0.96)", cursor: "zoom-out" }} onClick={(e) => { e.stopPropagation(); setFull(false); }}>
+          <button type="button" className="icon-btn" aria-label={T("Schließen", "Close")} onClick={(e) => { e.stopPropagation(); setFull(false); }} style={{ position: "fixed", top: "14px", right: "18px", zIndex: 101, color: "#fff" }}>
+            <Icon.Close />
+          </button>
+          <img src={src} alt="Trade Screenshot" style={{ maxWidth: "100vw", maxHeight: "100vh", width: "auto", height: "auto", objectFit: "contain", display: "block" }} />
+        </div>,
+        document.body
+      )}
+    </React.Fragment>
+  );
+}
+
+/* ============================================================
+   BACKTEST — gebacktestete Trades, getrennt vom Account
+   Wird nur im localStorage dieses Browsers (pro Profil) gespeichert, nie in Supabase und nie in den
+   Account-Statistiken. Dient dazu, aus Confluences Setups zu finden.
+   ============================================================ */
+const BT_LS_KEY = `journal_backtest__${ACTIVE_PROFILE ? ACTIVE_PROFILE.id : "x"}`;
+const btRR = (t) => (t.result === "be" ? 0 : t.result === "loss" ? -1 : t.sl > 0 && t.tp > 0 ? t.tp / t.sl : null);
+const btPts = (t) => (t.result === "be" ? 0 : t.result === "loss" ? -Math.abs(t.sl) : t.tp);
+function btStats(list) {
+  const wins = list.filter((t) => t.result === "win").length;
+  const losses = list.filter((t) => t.result === "loss").length;
+  const bes = list.filter((t) => t.result === "be").length;
+  const rr = list.map(btRR).filter((v) => v !== null && !Number.isNaN(v));
+  const pts = list.map(btPts).filter((v) => v !== null && v !== undefined && !Number.isNaN(v));
+  const sum = (a) => a.reduce((s, v) => s + v, 0);
+  return {
+    count: list.length, wins, losses, bes,
+    winrate: wins + losses ? (wins / (wins + losses)) * 100 : 0,
+    avgRR: rr.length ? sum(rr) / rr.length : 0,
+    totalRR: sum(rr),
+    avgPoints: pts.length ? sum(pts) / pts.length : 0,
+  };
+}
+
+/* Screenshots liegen in IndexedDB (localStorage waere mit ~5 MB schnell voll) */
+const BT_DB_NAME = `journal_backtest_shots__${ACTIVE_PROFILE ? ACTIVE_PROFILE.id : "x"}`;
+const btDb = () => new Promise((res, rej) => {
+  const r = indexedDB.open(BT_DB_NAME, 1);
+  r.onupgradeneeded = () => r.result.createObjectStore("shots");
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
+});
+const btShot = {
+  put: (id, v) => btDb().then((db) => new Promise((res, rej) => { const tx = db.transaction("shots", "readwrite"); tx.objectStore("shots").put(v, id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); })),
+  get: (id) => btDb().then((db) => new Promise((res, rej) => { const q = db.transaction("shots").objectStore("shots").get(id); q.onsuccess = () => res(q.result || ""); q.onerror = () => rej(q.error); })),
+  del: (id) => btDb().then((db) => new Promise((res) => { const tx = db.transaction("shots", "readwrite"); tx.objectStore("shots").delete(id); tx.oncomplete = () => res(); tx.onerror = () => res(); })).catch(() => {}),
+};
+function useBtSrc(id, has) {
+  const [src, setSrc] = useState("");
+  useEffect(() => { let on = true; if (has) btShot.get(id).then((v) => { if (on) setSrc(v); }).catch(() => {}); return () => { on = false; }; }, [id, has]);
+  return src;
+}
+function BtCard({ t, rr, onOpen }) {
+  const src = useBtSrc(t.id, t.hasShot);
+  return (
+    <div onClick={onOpen} style={{ position: "relative", aspectRatio: "16 / 10", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--line)", background: "var(--panel-2)", cursor: "pointer" }}>
+      {src ? <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", color: "var(--muted-light)" }}>{t.hasShot ? "…" : T("Kein Screenshot", "No screenshot")}</span>}
+      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "16px 8px 6px", background: "linear-gradient(transparent, rgba(0,0,0,0.82))", display: "flex", gap: "10px", fontSize: "13px", fontWeight: 700, color: "#fff" }}>
+        <span>{t.direction === "long" ? "Long" : "Short"}</span>
+        <span>{rr}</span>
+      </div>
+    </div>
+  );
+}
+function BtDetail({ t, rr, conf, pos, onPrev, onNext, onClose, onEdit, onDelete }) {
+  const src = useBtSrc(t.id, t.hasShot);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.stopPropagation(); onClose(); }
+      else if (e.key === "ArrowLeft" && onPrev) { e.preventDefault(); onPrev(); }
+      else if (e.key === "ArrowRight" && onNext) { e.preventDefault(); onNext(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose, onPrev, onNext]);
+  const swipeX = React.useRef(0);
+  const navBtn = (side, fn, label) => (fn ? <button type="button" aria-label={label} onClick={(e) => { e.stopPropagation(); fn(); }} style={{ position: "absolute", top: "50%", [side]: "14px", transform: "translateY(-50%)", width: "48px", height: "48px", borderRadius: "50%", border: "1px solid var(--line)", background: "rgba(20,20,20,0.7)", color: "#fff", fontSize: "28px", lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", paddingBottom: "4px" }}>{side === "left" ? "‹" : "›"}</button> : null);
+  const row = (k, v) => (v ? <div style={{ display: "flex", gap: "8px", fontSize: "13px" }}><span style={{ width: "96px", flexShrink: 0, color: "var(--muted-light)" }}>{k}</span><span style={{ flex: 1 }}>{v}</span></div> : null);
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 10000, background: "#000", display: "flex", flexWrap: "wrap", overflowY: "auto" }}>
+      <div onTouchStart={(e) => { swipeX.current = e.touches[0].clientX; }} onTouchEnd={(e) => { const dx = e.changedTouches[0].clientX - swipeX.current; if (dx > 60 && onPrev) onPrev(); else if (dx < -60 && onNext) onNext(); }} style={{ position: "relative", flex: "1 1 600px", minWidth: 0, minHeight: "55vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+        {src ? <img src={src} alt="" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "100%", maxHeight: "calc(100vh - 32px)", objectFit: "contain" }} /> : <span style={{ fontSize: "13px", color: "var(--muted-light)" }}>{t.hasShot ? "…" : T("Kein Screenshot", "No screenshot")}</span>}
+        {navBtn("left", onPrev, T("Vorheriger Trade", "Previous trade"))}
+        {navBtn("right", onNext, T("Nächster Trade", "Next trade"))}
+        {pos && <span style={{ position: "absolute", top: "14px", left: "50%", transform: "translateX(-50%)", fontSize: "12px", color: "var(--muted-light)", background: "rgba(20,20,20,0.7)", padding: "3px 10px", borderRadius: "999px" }}>{pos}</span>}
+      </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ flex: "0 0 320px", maxWidth: "100%", minHeight: "100vh", boxSizing: "border-box", background: "var(--panel-2)", borderLeft: "1px solid var(--line)", padding: "18px", display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          {row(T("Richtung", "Direction"), t.direction === "long" ? "Long" : "Short")}
+          {row("Stop Loss", t.sl > 0 ? `${t.sl} ${T("Punkte", "points")}` : "")}
+          {row("Take Profit", t.tp > 0 ? `${t.tp} ${T("Punkte", "points")}` : "")}
+          {row("RR", rr)}
+          {row("Confluences", conf)}
+          {row(T("Datum", "Date"), t.date ? t.date.split("-").reverse().join(".") : "")}
+          {row("Setup", t.setup)}
+          {row(T("Notiz", "Note"), t.note)}
+        </div>
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button type="button" className="btn-secondary" onClick={onEdit}>{T("Bearbeiten", "Edit")}</button>
+          <button type="button" className="btn-secondary" onClick={onDelete}>{T("Löschen", "Delete")}</button>
+          <button type="button" className="btn-secondary" onClick={onClose}>{T("Schließen", "Close")}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BacktestPanel({ onClose, existingSetups = [] }) {
+  const emptyForm = () => ({ direction: "long", sl: "", tp: "", confluences: [], shot: "" });
+  const [data, setData] = useState(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem(BT_LS_KEY));
+      return d && Array.isArray(d.trades) ? { trades: d.trades, tags: Array.isArray(d.tags) ? d.tags : [] } : { trades: [], tags: [] };
+    } catch { return { trades: [], tags: [] }; }
+  });
+  const [saveErr, setSaveErr] = useState(false);
+  useEffect(() => {
+    try { localStorage.setItem(BT_LS_KEY, JSON.stringify(data)); setSaveErr(false); } catch { setSaveErr(true); }
+  }, [data]);
+
+  const [tab, setTab] = useState("trades");
+  const [form, setForm] = useState(emptyForm);
+  const [editId, setEditId] = useState(null);
+  const [touched, setTouched] = useState(false);
+  const [viewShot, setViewShot] = useState(null);
+  const [detailId, setDetailId] = useState(null);
+  const [shotErr, setShotErr] = useState("");
+  const [shotDirty, setShotDirty] = useState(false);
+
+  const categoryTagSet = useMemo(() => new Set(CONFLUENCE_CATEGORIES.flatMap((cat) => cat.levels.map((l) => `${cat.label} ${l}`))), []);
+  const extraTags = useMemo(() => {
+    const s = new Set(data.tags);
+    data.trades.forEach((t) => (t.confluences || []).forEach((c) => { if (!categoryTagSet.has(c)) s.add(c); }));
+    return [...s];
+  }, [data, categoryTagSet]);
+
+  const err = {};
+  if (!(Number(form.sl) > 0)) err.sl = T("SL in Punkten, größer 0", "SL in points, above 0");
+  if (!(Number(form.tp) > 0)) err.tp = T("TP in Punkten, größer 0", "TP in points, above 0");
+  const fe = (k) => (touched && err[k] ? <span className="field-error">{err[k]}</span> : null);
+
+  const save = (e) => {
+    e.preventDefault();
+    setTouched(true);
+    if (Object.keys(err).length) return;
+    const prev = editId ? data.trades.find((x) => x.id === editId) : null;
+    const id = editId || `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    if (shotDirty) {
+      if (form.shot) btShot.put(id, form.shot).catch(() => setShotErr(T("Screenshot konnte nicht gespeichert werden.", "Screenshot could not be saved.")));
+      else btShot.del(id);
+    }
+    const t = {
+      ...(prev || {}),
+      id, direction: form.direction, result: (prev && prev.result) || "win",
+      sl: Number(form.sl), tp: Number(form.tp),
+      confluences: form.confluences, hasShot: !!form.shot,
+      shotV: shotDirty ? Date.now() : (prev && prev.shotV) || 0,
+    };
+    setData((d) => ({ ...d, trades: editId ? d.trades.map((x) => (x.id === editId ? t : x)) : [...d.trades, t] }));
+    // Richtung und SL bleiben stehen, damit man mehrere ähnliche Trades schnell hintereinander erfassen kann
+    setForm((f) => ({ ...emptyForm(), direction: f.direction, sl: f.sl }));
+    setEditId(null); setTouched(false); setShotDirty(false);
+  };
+  const edit = (t) => {
+    setForm({ direction: t.direction, sl: String(t.sl ?? ""), tp: String(t.tp ?? ""), confluences: t.confluences || [], shot: "" });
+    setShotDirty(false); setShotErr("");
+    if (t.hasShot) btShot.get(t.id).then((v) => setForm((f) => ({ ...f, shot: v || "" }))).catch(() => {});
+    setEditId(t.id); setTab("trades"); setTouched(false);
+  };
+  const del = (id) => { if (window.confirm(T("Backtest-Trade löschen?", "Delete backtest trade?"))) { btShot.del(id); setData((d) => ({ ...d, trades: d.trades.filter((t) => t.id !== id) })); } };
+  // Screenshot: wird auf max. 1600 px verkleinert und als JPEG gespeichert
+  const loadShot = (file) => {
+    if (!file || !file.type || !file.type.startsWith("image/")) return;
+    setShotErr("");
+    const fail = () => setShotErr(T("Bild konnte nicht gelesen werden.", "Could not read image."));
+    const reader = new FileReader();
+    reader.onerror = fail;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = fail;
+      img.onload = () => {
+        const sc = Math.min(1, 1600 / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        setForm((f) => ({ ...f, shot: c.toDataURL("image/jpeg", 0.8) }));
+        setShotDirty(true);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  const onPaste = (e) => {
+    const item = Array.from((e.clipboardData && e.clipboardData.items) || []).find((i) => i.type.startsWith("image/"));
+    if (item) { e.preventDefault(); loadShot(item.getAsFile()); }
+  };
+  const removeTag = (tag) => {
+    if (data.trades.some((t) => (t.confluences || []).includes(tag))) { window.alert(T("Diese Confluence wird noch in Trades verwendet.", "This confluence is still used in trades.")); return; }
+    setData((d) => ({ ...d, tags: d.tags.filter((x) => x !== tag) }));
+  };
+
+  // Gemeinsame Confluence-Auswahl (Formular + Analyse)
+  const picker = (list, setList, withRemove = false) => (
+    <div className="confluence-groups">
+      {CONFLUENCE_CATEGORIES.map((cat) => (
+        <div className="confluence-group" key={cat.label}>
+          <span className="confluence-group-label">{tagText(cat.label)}</span>
+          <div className="confluence-group-chips">
+            {cat.levels.map((level) => (
+              <button type="button" key={level} className={`confluence-chip ${chipState(list, cat, level)}`} onClick={() => setList((l) => toggleConfluenceTag(l, cat, level))} title={tagText(`${cat.label} ${level}`)}>{level}</button>
+            ))}
+          </div>
+        </div>
+      ))}
+      {extraTags.length > 0 && (
+        <div className="confluence-group">
+          <span className="confluence-group-label">{T("Eigene", "Custom")}</span>
+          <div className="confluence-group-chips">
+            {extraTags.map((tag) => (
+              <button type="button" key={tag} className={`confluence-chip ${list.includes(tag) ? "active" : ""}`}
+                onClick={() => setList((l) => (l.includes(tag) ? l.filter((x) => x !== tag) : [...l, tag]))}
+                onContextMenu={withRemove ? (e) => { e.preventDefault(); removeTag(tag); } : undefined}
+                title={withRemove ? T("Rechtsklick: Confluence entfernen (wenn ungenutzt)", "Right-click: remove confluence (if unused)") : tag}>{tag}</button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const sortedTrades = useMemo(() => [...data.trades].reverse(), [data.trades]);
+  const fmtR = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}R`;
+  const rrText = (t) => (btRR(t) !== null ? fmtR(btRR(t)) : "—");
+  const detailTrade = detailId ? data.trades.find((x) => x.id === detailId) : null;
+  const detailIdx = detailTrade ? sortedTrades.findIndex((x) => x.id === detailTrade.id) : -1;
+  const goDetail = (d) => { const n = sortedTrades[detailIdx + d]; if (n) setDetailId(n.id); };
+
+  return (
+    <React.Fragment>
+    <div className="overlay" onClick={onClose}>
+      <div className="panel ft-panel" style={{ width: "1400px", maxWidth: "97vw" }} onClick={(e) => e.stopPropagation()}>
+        <div className="panel-head">
+          <span>Backtest</span>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label={T("Schließen", "Close")}><Icon.Close /></button>
+        </div>
+        <span className="insight-sub">{T("Nur lokal in diesem Browser gespeichert – nicht im Account und nicht in den Statistiken.", "Stored only locally in this browser – not in the account or in the stats.")}</span>
+        {saveErr && <div className="notice notice-error">{T("Speichern im Browser fehlgeschlagen (Speicher voll?).", "Saving in the browser failed (storage full?).")}</div>}
+
+        <div className="filter-group">
+          <button type="button" className={`filter-chip ${tab === "trades" ? "active" : ""}`} onClick={() => setTab("trades")}>{T("Hinzufügen", "Add")}</button>
+          <button type="button" className={`filter-chip ${tab === "galerie" ? "active" : ""}`} onClick={() => setTab("galerie")}>{T(`Galerie (${data.trades.length})`, `Gallery (${data.trades.length})`)}</button>
+        </div>
+
+        {tab === "galerie" && (
+          sortedTrades.length === 0 ? (
+            <span className="insight-sub">{T("Noch keine Backtest-Trades. Erfasse sie im Tab „Hinzufügen“.", "No backtest trades yet. Add them in the “Add” tab.")}</span>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "10px" }}>
+              {sortedTrades.map((t) => (
+                <BtCard key={`${t.id}-${t.shotV || 0}`} t={t} rr={rrText(t)} onOpen={() => setDetailId(t.id)} />
+              ))}
+            </div>
+          )
+        )}
+
+        {tab === "trades" && (
+          <React.Fragment>
+            <form onSubmit={save} onPaste={onPaste} style={{ display: "flex", flexDirection: "column", gap: "14px", maxWidth: "720px" }}>
+              <div className="ft-section-title">{editId ? T("Backtest-Trade bearbeiten", "Edit backtest trade") : T("Backtest-Trade hinzufügen", "Add backtest trade")}</div>
+              <div className="field-grid">
+                <div className="field">
+                  <label>{T("Richtung", "Direction")}</label>
+                  <div className="dir-toggle">
+                    <button type="button" className={`dir-btn dir-long ${form.direction === "long" ? "active" : ""}`} onClick={() => setForm((f) => ({ ...f, direction: "long" }))}>Long</button>
+                    <button type="button" className={`dir-btn dir-short ${form.direction === "short" ? "active" : ""}`} onClick={() => setForm((f) => ({ ...f, direction: "short" }))}>Short</button>
+                  </div>
+                </div>
+              </div>
+              <div className="field-grid">
+                <div className="field"><label>{T("Stop Loss (Punkte)", "Stop loss (points)")}</label><input type="number" step="any" placeholder={T("z. B. 12.5", "e.g. 12.5")} value={form.sl} onChange={(e) => setForm((f) => ({ ...f, sl: e.target.value }))} />{fe("sl")}</div>
+                <div className="field"><label>{T("Take Profit (Punkte)", "Take profit (points)")}</label><input type="number" step="any" placeholder={T("z. B. 30", "e.g. 30")} value={form.tp} onChange={(e) => setForm((f) => ({ ...f, tp: e.target.value }))} />{fe("tp")}</div>
+              </div>
+              <div className="field">
+                <label>Confluences</label>
+                {picker(form.confluences, (fn) => setForm((f) => ({ ...f, confluences: typeof fn === "function" ? fn(f.confluences) : fn })), true)}
+              </div>
+              <div className="field">
+                <label>Screenshot</label>
+                {form.shot ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "flex-start" }}>
+                    <img src={form.shot} alt="" onClick={() => setViewShot(form.shot)} style={{ maxWidth: "100%", maxHeight: "220px", borderRadius: "6px", border: "1px solid var(--line)", cursor: "zoom-in" }} />
+                    <button type="button" className="btn-secondary" onClick={() => { setForm((f) => ({ ...f, shot: "" })); setShotDirty(true); }}>{T("Screenshot entfernen", "Remove screenshot")}</button>
+                  </div>
+                ) : (
+                  <div tabIndex={0} onClick={() => document.getElementById("bt-shot-input").click()} style={{ border: "1px dashed var(--line)", borderRadius: "6px", padding: "22px 12px", textAlign: "center", cursor: "pointer", color: "var(--muted-light)", fontSize: "12px" }}>
+                    {T("Screenshot mit Strg+V einfügen oder hier klicken, um eine Datei zu wählen", "Paste a screenshot with Ctrl+V or click here to choose a file")}
+                    <input id="bt-shot-input" type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { loadShot(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+                  </div>
+                )}
+                {shotErr && <span className="field-error">{shotErr}</span>}
+              </div>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button type="submit" className="btn-primary">{editId ? T("Speichern", "Save") : T("Hinzufügen", "Add")}</button>
+                {editId && <button type="button" className="btn-secondary" onClick={() => { setEditId(null); setForm(emptyForm()); setTouched(false); setShotDirty(false); }}>{T("Abbrechen", "Cancel")}</button>}
+              </div>
+            </form>
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+    {detailTrade && (
+      <BtDetail key={`${detailTrade.id}-${detailTrade.shotV || 0}`} t={detailTrade} rr={rrText(detailTrade)} conf={(detailTrade.confluences || []).map(tagText).join(", ")}
+        pos={`${detailIdx + 1} / ${sortedTrades.length}`}
+        onPrev={detailIdx > 0 ? () => goDetail(-1) : null}
+        onNext={detailIdx >= 0 && detailIdx < sortedTrades.length - 1 ? () => goDetail(1) : null}
+        onClose={() => setDetailId(null)}
+        onEdit={() => { setDetailId(null); edit(detailTrade); }}
+        onDelete={() => del(detailTrade.id)} />
+    )}
+    {viewShot && (
+      <div onClick={() => setViewShot(null)} style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", cursor: "zoom-out" }}>
+        <img src={viewShot} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: "6px" }} />
+      </div>
+    )}
     </React.Fragment>
   );
 }
@@ -5544,6 +5871,12 @@ function saveFriendsLS(list) {
 }
 
 function ProfilePicker() {
+  const [locking, setLocking] = useState(null);
+  const choose = (p) => {
+    try { localStorage.setItem(PROFILE_LS_KEY, p.id); } catch {}
+    window.location.reload();
+  };
+  if (locking) return <ProfileLock profile={locking} onUnlock={() => choose(locking)} onCancel={() => setLocking(null)} />;
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "28px", padding: "24px" }}>
       <img src="sharingan.png" alt="Logo" style={{ width: "220px", height: "100px", borderRadius: "10px" }} />
@@ -5554,15 +5887,97 @@ function ProfilePicker() {
             key={p.id}
             className="btn-secondary"
             style={{ padding: "22px 44px", fontSize: "16px" }}
-            onClick={() => {
-              try { localStorage.setItem(PROFILE_LS_KEY, p.id); } catch {}
-              window.location.reload();
-            }}
+            onClick={() => (p.lock ? setLocking(p) : choose(p))}
           >
             {p.name}
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+/* ===== PROFIL-SPERRE (Profile mit lock: true): Passwort wie beim Portfolio =====
+   Die Abfrage kommt erst, wenn man in der Profilauswahl auf das Profil klickt. Beim ersten Mal wird ein Passwort
+   festgelegt, danach gilt die Entsperrung pro Browser-Tab. Gespeichert wird nur der SHA-256-Hash, in der
+   Settings-Tabelle des Profils (Key profile_pw_<id>). */
+const profHash = async (pw) => {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("prof:" + pw));
+  return Array.from(new Uint8Array(b)).map((x) => x.toString(16).padStart(2, "0")).join("");
+};
+
+function ProfileLock({ profile, onUnlock, onCancel }) {
+  const p = profile;
+  const base = `${String(p.url).replace(/\/+$/, "")}/rest/v1/Settings`;
+  const H = { apikey: p.key, Authorization: `Bearer ${p.key}`, "Content-Type": "application/json" };
+  const rowKey = `profile_pw_${p.id}`;
+  const [hash, setHash] = useState(undefined); // undefined = lädt, null = noch kein Passwort gesetzt
+  const [pw, setPw] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const loadHash = useCallback(() => {
+    setHash(undefined);
+    setMsg(null);
+    fetch(`${base}?key=eq.${rowKey}&select=value`, { headers: H })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => setHash(d[0] ? d[0].value : null))
+      .catch(() => setMsg("Settings-Tabelle nicht erreichbar."));
+  }, []);
+  useEffect(() => { loadHash(); }, [loadHash]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    // Wert aus dem Formular lesen, damit auch ein Autofill des Browsers (z. B. Touch ID) ankommt.
+    const val = String(new FormData(e.currentTarget).get("password") || pw);
+    if (busy || hash === undefined) return;
+    setBusy(true);
+    try {
+      const h = await profHash(val);
+      if (hash === null) {
+        if (val.length < 4) { setMsg("Mindestens 4 Zeichen."); return; }
+        const r = await fetch(`${base}?on_conflict=key`, {
+          method: "POST",
+          headers: { ...H, Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify({ key: rowKey, value: h, updated_at: new Date().toISOString() }),
+        });
+        if (!r.ok) { setMsg("Passwort konnte nicht gespeichert werden."); return; }
+      } else if (h !== hash) {
+        setMsg("Falsches Passwort.");
+        return;
+      }
+      try { sessionStorage.setItem(`${PROF_OK_KEY}__${p.id}`, "1"); } catch {}
+      onUnlock();
+    } catch {
+      setMsg("Verbindung fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inp = { background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: "6px", color: "var(--text)", padding: "9px 10px", fontSize: "13px", fontFamily: "'JetBrains Mono', monospace", minWidth: 0 };
+  const loadFailed = hash === undefined && !!msg;
+
+  return (
+    <div className="overlay">
+      <form className="panel" style={{ width: "360px", maxWidth: "95vw" }} method="post" autoComplete="on" onSubmit={submit}>
+        <div className="panel-head"><span>{p.name}</span></div>
+        {hash === undefined && !msg ? <div className="cal-loading">Lade…</div> : loadFailed ? (
+          <React.Fragment>
+            <div className="notice notice-error">{msg}</div>
+            <button type="button" className="btn-primary" onClick={loadHash}>Erneut versuchen</button>
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <div style={{ fontSize: "13px", color: "var(--muted-light)" }}>{hash === null ? `Neues Passwort für das Profil ${p.name} festlegen:` : "Passwort eingeben:"}</div>
+            {/* Benutzername + Passwort mit autocomplete: dadurch bietet der Browser das Speichern an (iCloud-Schlüsselbund, Chrome, ...) und füllt es später selbst aus. */}
+            <input type="text" id="journal-username" name="username" autoComplete="username" value={p.name} readOnly style={{ ...inp, opacity: 0.7 }} />
+            <input type="password" id="journal-password" name="password" autoComplete={hash === null ? "new-password" : "current-password"} autoFocus style={inp} value={pw} onChange={(e) => setPw(e.target.value)} />
+            {msg && <div className="notice notice-error">{msg}</div>}
+            <button type="submit" className="btn-primary" disabled={busy}>{hash === null ? "Festlegen" : "Entsperren"}</button>
+          </React.Fragment>
+        )}
+        <button type="button" className="btn-secondary" onClick={onCancel}>Zurück</button>
+      </form>
     </div>
   );
 }
@@ -5573,7 +5988,7 @@ function normalizeSupabaseUrl(u) {
 function tradeRR(t) {
   if (t.result === "be") return 0;
   if (t.realized_rr !== null && t.realized_rr !== undefined) return Number(t.realized_rr);
-  if (t.result === "loss") return t.rr !== null && t.rr !== undefined ? -1 : null;
+  if (t.result === "loss") return -1;
   if (t.result === "win") return t.rr !== null && t.rr !== undefined ? Number(t.rr) : null;
   return null;
 }
@@ -6267,6 +6682,14 @@ function FriendsOverview({ myName, theirName, mine, theirs, duel }) {
     <FriendsBreakdown mine={mine} theirs={theirs} myName={myName} theirName={theirName} keyFn={keyFn} {...extra} />
   );
 
+  const namesHead = (
+    <div style={{ display: "grid", gridTemplateColumns: "190px 1fr 1fr", gap: "22px", paddingBottom: "8px", borderBottom: "1px solid var(--line)" }}>
+      <span />
+      <span style={{ color: ME_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{myName}</span>
+      <span style={{ color: FRIEND_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{theirName}</span>
+    </div>
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
       <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
@@ -6274,37 +6697,8 @@ function FriendsOverview({ myName, theirName, mine, theirs, duel }) {
         <FriendsHeroCard name={theirName} color={FRIEND_COLOR} sum={B.sum} leading={diff < 0} />
       </div>
 
-      {takeaways.length > 0 && (
-        <div style={{ ...friendsCard, marginBottom: 0 }}>
-          <div style={friendsSectionTitle}>{T("Fazit", "Takeaways")}</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "9px" }}>
-            {takeaways.map((t) => (
-              <div key={t.key} style={{ display: "flex", gap: "10px", fontSize: "12.5px", lineHeight: 1.6, color: t.warn ? "#ff6b78" : "var(--text)" }}>
-                <span style={{ color: t.warn ? "var(--red)" : "var(--muted)", flexShrink: 0 }}>●</span>
-                <span>{t.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {duel.total > 0 && (
-        <div style={{ ...friendsCard, marginBottom: 0 }}>
-          <div style={friendsSectionTitle}>{T(`Tagesduell · ${duel.total} gemeinsame Handelstage`, `Daily duel · ${duel.total} shared trading days`)}</div>
-          <div style={{ display: "flex", height: "10px", borderRadius: "5px", overflow: "hidden", background: "#1a1a1a" }}>
-            <div style={{ width: `${(duel.w / duel.total) * 100}%`, background: ME_COLOR }} />
-            <div style={{ width: `${(duel.t / duel.total) * 100}%`, background: "#444" }} />
-            <div style={{ width: `${(duel.l / duel.total) * 100}%`, background: FRIEND_COLOR }} />
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "10px", fontSize: "12px" }}>
-            <span style={{ color: ME_COLOR }}>{myName} {T("besser:", "ahead:")} <b>{duel.w}</b></span>
-            <span style={{ color: "var(--muted-light)" }}>{T("Gleichstand:", "Tie:")} <b>{duel.t}</b></span>
-            <span style={{ color: FRIEND_COLOR }}>{theirName} {T("besser:", "ahead:")} <b>{duel.l}</b></span>
-          </div>
-        </div>
-      )}
-
-      <div style={{ ...friendsCard, marginBottom: 0 }}>
+      <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", alignItems: "flex-start" }}>
+      <div style={{ ...friendsCard, marginBottom: 0, flex: "2 1 560px", minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "10px" }}>
           <div style={{ ...friendsSectionTitle, marginBottom: 0 }}>{T("Equity-Vergleich", "Equity comparison")}</div>
           <div style={{ display: "flex", gap: "6px" }}>
@@ -6315,25 +6709,53 @@ function FriendsOverview({ myName, theirName, mine, theirs, duel }) {
         </div>
         <FriendsEquityChart mine={mine} theirs={theirs} myName={myName} theirName={theirName} unit={unit} />
       </div>
-
-      <div style={{ ...friendsCard, marginBottom: 0 }}>
-        <div style={friendsSectionTitle}>{T("Vergleichstabelle", "Comparison table")}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "210px 1fr 1fr", gap: "22px", paddingBottom: "8px", borderBottom: "1px solid var(--line)" }}>
-          <span />
-          <span style={{ color: ME_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{myName}</span>
-          <span style={{ color: FRIEND_COLOR, fontWeight: 700, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{theirName}</span>
+      {(takeaways.length > 0 || duel.total > 0) && (
+        <div style={{ flex: "1 1 340px", minWidth: 0, display: "flex", flexDirection: "column", gap: "14px" }}>
+          {takeaways.length > 0 && (
+            <div style={{ ...friendsCard, marginBottom: 0 }}>
+              <div style={friendsSectionTitle}>{T("Fazit", "Takeaways")}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "9px" }}>
+                {takeaways.map((t) => (
+                  <div key={t.key} style={{ display: "flex", gap: "10px", fontSize: "12.5px", lineHeight: 1.6, color: t.warn ? "#ff6b78" : "var(--text)" }}>
+                    <span style={{ color: t.warn ? "var(--red)" : "var(--muted)", flexShrink: 0 }}>●</span>
+                    <span>{t.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {duel.total > 0 && (
+            <div style={{ ...friendsCard, marginBottom: 0 }}>
+              <div style={friendsSectionTitle}>{T(`Tagesduell · ${duel.total} gemeinsame Handelstage`, `Daily duel · ${duel.total} shared trading days`)}</div>
+              <div style={{ display: "flex", height: "10px", borderRadius: "5px", overflow: "hidden", background: "#1a1a1a" }}>
+                <div style={{ width: `${(duel.w / duel.total) * 100}%`, background: ME_COLOR }} />
+                <div style={{ width: `${(duel.t / duel.total) * 100}%`, background: "#444" }} />
+                <div style={{ width: `${(duel.l / duel.total) * 100}%`, background: FRIEND_COLOR }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "10px", fontSize: "12px" }}>
+                <span style={{ color: ME_COLOR }}>{myName} {T("besser:", "ahead:")} <b>{duel.w}</b></span>
+                <span style={{ color: "var(--muted-light)" }}>{T("Gleichstand:", "Tie:")} <b>{duel.t}</b></span>
+                <span style={{ color: FRIEND_COLOR }}>{theirName} {T("besser:", "ahead:")} <b>{duel.l}</b></span>
+              </div>
+            </div>
+          )}
         </div>
+      )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(600px, 100%), 1fr))", gap: "14px", alignItems: "start" }}>
         {sections.map((sec) => (
-          <React.Fragment key={sec.title}>
-            <div style={{ ...friendsLabel, padding: "16px 0 6px", color: "var(--muted-light)" }}>{sec.title}</div>
+          <div key={sec.title} style={{ ...friendsCard, marginBottom: 0 }}>
+            <div style={friendsSectionTitle}>{sec.title}</div>
+            {namesHead}
             {sec.rows.map((r) => (
-              <div key={r.label} style={{ display: "grid", gridTemplateColumns: "210px 1fr 1fr", gap: "22px", alignItems: "center", padding: "9px 0", borderBottom: "1px solid var(--line)" }}>
+              <div key={r.label} style={{ display: "grid", gridTemplateColumns: "190px 1fr 1fr", gap: "22px", alignItems: "center", padding: "9px 0", borderBottom: "1px solid var(--line)" }}>
                 <span style={{ fontSize: "12px", color: "var(--muted-light)" }}>{r.label}</span>
                 {cell(r, "a", ME_COLOR)}
                 {cell(r, "b", FRIEND_COLOR)}
               </div>
             ))}
-          </React.Fragment>
+          </div>
         ))}
       </div>
 
@@ -6921,7 +7343,7 @@ function FriendsPanel({ onClose, myTrades }) {
                 <Icon.Close />
               </button>
             </div>
-            <img className="shot-overlay-img" src={shot} alt="Trade Screenshot" />
+            <ShotImage src={shot} />
           </div>
         </div>
       )}
@@ -6998,6 +7420,39 @@ function pfCompute(txs, quotes, manualKo) {
   return { series, perf, rows, now, ko: g ? { dist: ((g - K.strike) / g) * 100, lev: g / (g - K.strike) } : null };
 }
 
+/* ===== FinancialJuice News-Widget (Embed) ===== */
+function FinancialJuiceWidget() {
+  useEffect(() => {
+    const cid = "financialjuice-news-widget-container";
+    const make = () => {
+      const box = document.getElementById(cid);
+      if (!box || !window.FJWidgets) return;
+      box.innerHTML = "";
+      new window.FJWidgets.createWidget({
+        container: cid,
+        mode: "Dark",
+        width: "680px",
+        height: "150px",
+        backColor: "1e222d",
+        fontColor: "b2b5be",
+        widgetType: "NEWS",
+      });
+    };
+    let jo = null;
+    if (window.FJWidgets) make();
+    else {
+      jo = document.createElement("script");
+      jo.type = "text/javascript";
+      jo.id = "FJ-Widgets";
+      jo.src = "https://feed.financialjuice.com/widgets/widgets.js?r=" + Math.floor(Math.random() * 10000);
+      jo.onload = make;
+      document.head.appendChild(jo);
+    }
+    return () => { const box = document.getElementById(cid); if (box) box.innerHTML = ""; };
+  }, []);
+  return <div id="financialjuice-news-widget-container" style={{ margin: "0 0 14px", minHeight: "150px" }} />;
+}
+
 /* ===== NEWS (Wirtschaftskalender, nur Profil "cody") ===== */
 function NewsPanel({ onClose, trades }) {
   const [ev, setEv] = useState(null);
@@ -7034,6 +7489,21 @@ function NewsPanel({ onClose, trades }) {
   const st = (l) => ({ n: l.length, pnl: l.reduce((s, t) => s + (t.pnl || 0), 0), win: l.length ? (l.filter((t) => (t.pnl || 0) > 0).length / l.length) * 100 : null });
   const A = st(tr.filter((t) => hi.has(t.trade_date))), B = st(tr.filter((t) => !hi.has(t.trade_date)));
   const usd = (n) => n.toLocaleString("de-DE", { style: "currency", currency: "USD" });
+  // Key-Termine dieses Monats (CPI, PPI, NFP, FOMC, PCE) – oben fix, unabhängig von den Farbfiltern
+  const monthKey = day(new Date().toISOString()).slice(0, 7);
+  const todayKey = day(new Date().toISOString());
+  const KEYS = [
+    ["CPI", /^(?!.*core).*\bCPI\b/i],
+    ["PPI", /^(?!.*core).*\bPPI\b/i],
+    ["NFP", /non-?farm/i],
+    ["FOMC", /FOMC\s*(statement|press)|federal\s*funds\s*rate/i],
+    ["PCE", /core\s*pce|\bPCE\b/i],
+  ];
+  const keyEv = KEYS.map(([k, re]) => {
+    const hit = all.filter((e) => e.currency === "USD" && day(e.event_time).startsWith(monthKey) && re.test(e.title || ""))
+      .sort((a, b) => new Date(a.event_time) - new Date(b.event_time))[0];
+    return [k, hit || null];
+  });
   const lbl = { fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.14em", fontWeight: 700 };
   const card = (title, s) => (
     <div style={{ flex: 1, border: "1px solid var(--line)", borderRadius: "6px", padding: "12px", background: "var(--panel-2)", fontFamily: PF_MONO }}>
@@ -7048,6 +7518,21 @@ function NewsPanel({ onClose, trades }) {
       <div className="panel" style={{ width: "760px", maxWidth: "97vw", maxHeight: "95vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
         <div className="panel-head"><span>News</span><button type="button" className="icon-btn" onClick={onClose}><Icon.Close /></button></div>
         {msg && <div className="notice notice-error">{msg}</div>}
+        <div style={{ ...lbl, padding: "4px 0 8px" }}>Key-Termine {new Date().toLocaleDateString("de-DE", { month: "long", year: "numeric" })}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "8px", marginBottom: "14px" }}>
+          {keyEv.map(([k, e]) => {
+            const d = e ? day(e.event_time) : null;
+            const past = d && d < todayKey, isToday = d === todayKey;
+            return (
+              <div key={k} style={{ border: `1px solid ${isToday ? "#e0001a" : "var(--line)"}`, borderRadius: "6px", padding: "8px 10px", background: "var(--panel-2)", fontFamily: PF_MONO, opacity: past ? 0.45 : 1 }}>
+                <div style={{ fontSize: "12px", fontWeight: 700 }}>{k}{isToday ? " · heute" : ""}</div>
+                <div style={{ fontSize: "12px", marginTop: "4px", color: e ? "var(--text, inherit)" : "var(--muted)" }}>{e ? new Date(e.event_time).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" }) : "–"}</div>
+                <div style={{ fontSize: "11px", color: "var(--muted-light)" }}>{e ? new Date(e.event_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "kein Termin"}</div>
+              </div>
+            );
+          })}
+        </div>
+        <FinancialJuiceWidget />
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
           <div className="filter-group">{[["High", "Rot"], ["Medium", "Orange"], ["Holiday", "Grau"]].map(([k, l]) => <button key={k} type="button" className={`filter-chip ${imp[k] ? "active" : ""}`} style={{ color: imp[k] ? IMPC[k] : undefined }} onClick={() => setImp({ ...imp, [k]: !imp[k] })}>■ {l}</button>)}</div>
         </div>
@@ -7257,6 +7742,27 @@ function PortfolioPanel({ onClose }) {
     </div>
   );
 }
+
+/* Scroll-Lock: solange irgendein .overlay (Popup) im DOM ist, bleibt der Hintergrund fest */
+(function () {
+  const html = document.documentElement;
+  let locked = false;
+  const sync = () => {
+    const open = !!document.querySelector(".overlay");
+    if (open === locked) return;
+    locked = open;
+    if (open) {
+      const sw = window.innerWidth - html.clientWidth; // Scrollbar-Breite, damit nichts springt
+      if (sw > 0) html.style.paddingRight = sw + "px";
+      html.classList.add("modal-open");
+    } else {
+      html.classList.remove("modal-open");
+      html.style.paddingRight = "";
+    }
+  };
+  new MutationObserver(sync).observe(document.body, { childList: true, subtree: true });
+  sync();
+})();
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 const renderApp = () => root.render(ACTIVE_PROFILE ? <TradingJournal /> : <ProfilePicker />);
