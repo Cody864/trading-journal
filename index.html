@@ -1078,7 +1078,7 @@ if (ACTIVE_PROFILE) {
   // Geraets, auf dem sie gesetzt wurden (Handy startete deshalb immer in der Eval Stage). Jetzt werden
   // sie zusaetzlich in der Datenbank gespeichert und beim Start geladen. Die Datenbank gewinnt; nur wenn
   // dort noch nichts steht, wird der lokale Wert hochgeladen. Fehlt die Tabelle, bleibt alles lokal.
-  const SYNC_KEYS = ["journal_funded_stage", "journal_funded_start_date", "journal_funded_activated_at", "journal_funded_payouts", "journal_funded_last_payout", ACCOUNTS_LS_KEY, NOTES_LS_KEY];
+  const SYNC_KEYS = ["journal_funded_stage", "journal_funded_start_date", "journal_funded_activated_at", "journal_funded_payouts", "journal_funded_last_payout", ACCOUNTS_LS_KEY, NOTES_LS_KEY, `journal_backtest__${ACTIVE_PROFILE.id}`];
   const settingsOn = !String(ACTIVE_PROFILE.url).includes("DEIN-PROJEKT") && !String(ACTIVE_PROFILE.key).includes("DEIN-ANON-KEY");
   const SETTINGS_URL = `${String(ACTIVE_PROFILE.url).replace(/\/+$/, "")}/rest/v1/Settings`;
   const sbH = { apikey: ACTIVE_PROFILE.key, Authorization: `Bearer ${ACTIVE_PROFILE.key}`, "Content-Type": "application/json" };
@@ -1102,7 +1102,7 @@ if (ACTIVE_PROFILE) {
     try {
       const ctrl = new AbortController();
       const to = setTimeout(() => ctrl.abort(), 4000);
-      const res = await fetch(`${SETTINGS_URL}?select=key,value`, { headers: sbH, signal: ctrl.signal });
+      const res = await fetch(`${SETTINGS_URL}?select=key,value&key=not.like.bt_shot_*`, { headers: sbH, signal: ctrl.signal });
       clearTimeout(to);
       if (!res.ok) return; // Tabelle fehlt -> nur lokal
       const remote = {};
@@ -5328,8 +5328,9 @@ function ShotImage({ src }) {
 
 /* ============================================================
    BACKTEST — gebacktestete Trades, getrennt vom Account
-   Wird nur im localStorage dieses Browsers (pro Profil) gespeichert, nie in Supabase und nie in den
-   Account-Statistiken. Dient dazu, aus Confluences Setups zu finden.
+   Die Trades liegen im localStorage und werden (wie Notizen und Konten) ueber die Settings-Tabelle in Supabase gesichert,
+   die Screenshots in IndexedDB (Cache) plus Supabase (Key bt_shot_<id>). So sind sie in jedem Browser und auf jedem
+   Geraet da. Nie in den Account-Statistiken. Dient dazu, aus Confluences Setups zu finden.
    ============================================================ */
 const BT_LS_KEY = `journal_backtest__${ACTIVE_PROFILE ? ACTIVE_PROFILE.id : "x"}`;
 const btRR = (t) => (t.result === "be" ? 0 : t.result === "loss" ? -1 : t.sl > 0 && t.tp > 0 ? t.tp / t.sl : null);
@@ -5358,18 +5359,69 @@ const btDb = () => new Promise((res, rej) => {
   r.onsuccess = () => res(r.result);
   r.onerror = () => rej(r.error);
 });
-const btShot = {
+const btLocal = {
   put: (id, v) => btDb().then((db) => new Promise((res, rej) => { const tx = db.transaction("shots", "readwrite"); tx.objectStore("shots").put(v, id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); })),
   get: (id) => btDb().then((db) => new Promise((res, rej) => { const q = db.transaction("shots").objectStore("shots").get(id); q.onsuccess = () => res(q.result || ""); q.onerror = () => rej(q.error); })),
   del: (id) => btDb().then((db) => new Promise((res) => { const tx = db.transaction("shots", "readwrite"); tx.objectStore("shots").delete(id); tx.oncomplete = () => res(); tx.onerror = () => res(); })).catch(() => {}),
 };
-function useBtSrc(id, has) {
+/* Screenshots zusaetzlich in der Datenbank sichern (Tabelle "Settings", Key bt_shot_<id>), damit sie in jedem Browser und auf
+   jedem Geraet verfuegbar sind. IndexedDB bleibt als schneller lokaler Cache. Der Marker "<id>#v" im Cache merkt sich, welche
+   Version (shotV) lokal liegt und dass sie in der Datenbank ist. */
+const BT_SHOT_PREFIX = "bt_shot_";
+const btRemote = (() => {
+  const url = ACTIVE_PROFILE ? `${String(ACTIVE_PROFILE.url).replace(/\/+$/, "")}/rest/v1/Settings` : "";
+  const h = ACTIVE_PROFILE ? { apikey: ACTIVE_PROFILE.key, Authorization: `Bearer ${ACTIVE_PROFILE.key}`, "Content-Type": "application/json" } : {};
+  const ok = (r) => { if (!r.ok) throw new Error("http " + r.status); return r; };
+  return {
+    put: (id, v) => fetch(`${url}?on_conflict=key`, { method: "POST", headers: { ...h, Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ key: BT_SHOT_PREFIX + id, value: v, updated_at: new Date().toISOString() }) }).then(ok),
+    get: (id) => fetch(`${url}?key=eq.${BT_SHOT_PREFIX}${encodeURIComponent(id)}&select=value`, { headers: h }).then(ok).then((r) => r.json()).then((d) => (d[0] && d[0].value) || ""),
+    del: (id) => fetch(`${url}?key=eq.${BT_SHOT_PREFIX}${encodeURIComponent(id)}`, { method: "DELETE", headers: h }).catch(() => {}),
+  };
+})();
+const btShot = {
+  // Lokal speichern, dann in die Datenbank hochladen. Schlaegt der Upload fehl, wird der Fehler an den Aufrufer gegeben.
+  put: async (id, v, ver) => {
+    try { await btLocal.del(id + "#v"); await btLocal.put(id, v); } catch {}
+    await btRemote.put(id, v);
+    try { await btLocal.put(id + "#v", String(ver || 0)); } catch {}
+  },
+  // Erst der lokale Cache (wenn die Version passt), sonst aus der Datenbank holen und lokal merken.
+  get: async (id, ver) => {
+    try {
+      const [d, lv] = await Promise.all([btLocal.get(id), btLocal.get(id + "#v")]);
+      if (d && (!lv || ver === undefined || String(lv) === String(ver || 0))) return d;
+    } catch {}
+    try {
+      const r = await btRemote.get(id);
+      if (r) {
+        btLocal.put(id, r).then(() => btLocal.put(id + "#v", String(ver || 0))).catch(() => {});
+        return r;
+      }
+    } catch {}
+    try { return await btLocal.get(id); } catch { return ""; }
+  },
+  del: (id) => Promise.all([btLocal.del(id), btLocal.del(id + "#v"), btRemote.del(id)]).then(() => {}),
+};
+// Screenshots, die bisher nur in diesem Browser liegen, einmalig in die Datenbank hochladen.
+async function btMigrateShots(trades) {
+  for (const t of trades) {
+    if (!t.hasShot) continue;
+    try {
+      if (await btLocal.get(t.id + "#v")) continue; // schon in der Datenbank
+      const d = await btLocal.get(t.id);
+      if (!d) continue;
+      await btRemote.put(t.id, d);
+      await btLocal.put(t.id + "#v", String(t.shotV || 0));
+    } catch { /* beim naechsten Oeffnen erneut versuchen */ }
+  }
+}
+function useBtSrc(id, has, ver) {
   const [src, setSrc] = useState("");
-  useEffect(() => { let on = true; if (has) btShot.get(id).then((v) => { if (on) setSrc(v); }).catch(() => {}); return () => { on = false; }; }, [id, has]);
+  useEffect(() => { let on = true; if (has) btShot.get(id, ver || 0).then((v) => { if (on) setSrc(v); }).catch(() => {}); return () => { on = false; }; }, [id, has, ver]);
   return src;
 }
 function BtCard({ t, rr, onOpen }) {
-  const src = useBtSrc(t.id, t.hasShot);
+  const src = useBtSrc(t.id, t.hasShot, t.shotV);
   return (
     <div onClick={onOpen} style={{ position: "relative", aspectRatio: "16 / 10", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--line)", background: "var(--panel-2)", cursor: "pointer" }}>
       {src ? <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", color: "var(--muted-light)" }}>{t.hasShot ? "…" : T("Kein Screenshot", "No screenshot")}</span>}
@@ -5381,7 +5433,7 @@ function BtCard({ t, rr, onOpen }) {
   );
 }
 function BtDetail({ t, rr, conf, pos, onPrev, onNext, onClose, onEdit, onDelete }) {
-  const src = useBtSrc(t.id, t.hasShot);
+  const src = useBtSrc(t.id, t.hasShot, t.shotV);
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") { e.stopPropagation(); onClose(); }
@@ -5432,9 +5484,13 @@ function BacktestPanel({ onClose, existingSetups = [] }) {
     } catch { return { trades: [], tags: [] }; }
   });
   const [saveErr, setSaveErr] = useState(false);
+  const btFirst = React.useRef(true);
   useEffect(() => {
+    // Der Anfangszustand stammt aus dem localStorage, beim Öffnen muss nichts geschrieben (und nicht in die Datenbank gepusht) werden.
+    if (btFirst.current) { btFirst.current = false; return; }
     try { localStorage.setItem(BT_LS_KEY, JSON.stringify(data)); setSaveErr(false); } catch { setSaveErr(true); }
   }, [data]);
+  useEffect(() => { btMigrateShots(data.trades); }, []);
 
   const [tab, setTab] = useState("trades");
   const [form, setForm] = useState(emptyForm);
@@ -5463,8 +5519,9 @@ function BacktestPanel({ onClose, existingSetups = [] }) {
     if (Object.keys(err).length) return;
     const prev = editId ? data.trades.find((x) => x.id === editId) : null;
     const id = editId || `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const shotV = shotDirty ? Date.now() : (prev && prev.shotV) || 0;
     if (shotDirty) {
-      if (form.shot) btShot.put(id, form.shot).catch(() => setShotErr(T("Screenshot konnte nicht gespeichert werden.", "Screenshot could not be saved.")));
+      if (form.shot) btShot.put(id, form.shot, shotV).catch(() => setShotErr(T("Screenshot konnte nicht in der Datenbank gespeichert werden, liegt aber lokal vor.", "Screenshot could not be saved to the database, but is stored locally.")));
       else btShot.del(id);
     }
     const t = {
@@ -5472,7 +5529,7 @@ function BacktestPanel({ onClose, existingSetups = [] }) {
       id, direction: form.direction, result: (prev && prev.result) || "win",
       sl: Number(form.sl), tp: Number(form.tp),
       confluences: form.confluences, hasShot: !!form.shot,
-      shotV: shotDirty ? Date.now() : (prev && prev.shotV) || 0,
+      shotV,
     };
     setData((d) => ({ ...d, trades: editId ? d.trades.map((x) => (x.id === editId ? t : x)) : [...d.trades, t] }));
     // Richtung und SL bleiben stehen, damit man mehrere ähnliche Trades schnell hintereinander erfassen kann
@@ -5482,7 +5539,7 @@ function BacktestPanel({ onClose, existingSetups = [] }) {
   const edit = (t) => {
     setForm({ direction: t.direction, sl: String(t.sl ?? ""), tp: String(t.tp ?? ""), confluences: t.confluences || [], shot: "" });
     setShotDirty(false); setShotErr("");
-    if (t.hasShot) btShot.get(t.id).then((v) => setForm((f) => ({ ...f, shot: v || "" }))).catch(() => {});
+    if (t.hasShot) btShot.get(t.id, t.shotV || 0).then((v) => setForm((f) => ({ ...f, shot: v || "" }))).catch(() => {});
     setEditId(t.id); setTab("trades"); setTouched(false);
   };
   const del = (id) => { if (window.confirm(T("Backtest-Trade löschen?", "Delete backtest trade?"))) { btShot.del(id); setData((d) => ({ ...d, trades: d.trades.filter((t) => t.id !== id) })); } };
